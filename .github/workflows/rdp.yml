@@ -1,0 +1,83 @@
+name: Windows RDP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rdp:
+    runs-on: windows-2025
+    timeout-minutes: 360
+
+    steps:
+      - name: Enable RDP
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+          $password = ConvertTo-SecureString "RobloxRDP2026!" -AsPlainText -Force
+
+          if (-not (Get-LocalUser -Name "rdpuser" -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name "rdpuser" -Password $password -PasswordNeverExpires
+          }
+
+          Add-LocalGroupMember -Group "Administrators" -Member "rdpuser"
+
+          Set-Service -Name TermService -StartupType Automatic
+          Start-Service TermService
+
+      - name: Install Tailscale
+        shell: powershell
+        run: |
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          Invoke-WebRequest $url -OutFile "$env:TEMP\tailscale.msi"
+
+          Start-Process msiexec.exe `
+            -ArgumentList "/i `"$env:TEMP\tailscale.msi`" /qn /norestart" `
+            -Wait
+
+      - name: Connect Tailscale
+        shell: powershell
+        env:
+          TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
+        run: |
+          & "C:\Program Files\Tailscale\tailscale.exe" up `
+            --auth-key="$env:TS_AUTH_KEY" `
+            --hostname="roblox-rdp"
+
+          Start-Sleep -Seconds 5
+
+          $ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+
+          Write-Host ""
+          Write-Host "===================================="
+          Write-Host "RDP IP:"
+          Write-Host $ip
+          Write-Host ""
+          Write-Host "USERNAME: rdpuser"
+          Write-Host "PASSWORD: RobloxRDP2026!"
+          Write-Host "===================================="
+          Write-Host ""
+
+      - name: Install Roblox Studio
+        shell: powershell
+        run: |
+          Invoke-WebRequest `
+            "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
+            -OutFile "$env:TEMP\RobloxStudioLauncherBeta.exe"
+
+          Start-Process `
+            "$env:TEMP\RobloxStudioLauncherBeta.exe" `
+            -ArgumentList "-install" `
+            -Wait
+
+      - name: Keep Windows alive
+        shell: powershell
+        run: |
+          Write-Host "Windows RDP is ready."
+          Write-Host "Keep this job running while you use Roblox Studio."
+
+          while ($true) {
+              Start-Sleep -Seconds 9999
+              Write-Host "RDP still running: $(Get-Date)"
+          }
