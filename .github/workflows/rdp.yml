@@ -24,7 +24,7 @@ jobs:
           # RDP USER
           # ----------------------------
           $UserName = "3NB"
-          $PasswordPlain = "511"
+          $PasswordPlain = "roblox"
           $Password = ConvertTo-SecureString $PasswordPlain -AsPlainText -Force
 
           $ExistingUser = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
@@ -473,7 +473,7 @@ jobs:
           Write-Host "3NB"
           Write-Host ""
           Write-Host "Password:"
-          Write-Host "511"
+          Write-Host "roblox"
           Write-Host ""
           Write-Host "Tailscale IP:"
           & $Tailscale ip -4
