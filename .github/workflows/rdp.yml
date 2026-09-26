@@ -1,4 +1,4 @@
-name: Roblox Studio RDP V4
+name: Roblox Studio RDP V5
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ jobs:
     steps:
 
       # ============================================================
-      # 1. PREPARE WINDOWS + RDP
+      # 1. WINDOWS + RDP
       # ============================================================
       - name: Prepare Windows
         shell: powershell
@@ -20,9 +20,10 @@ jobs:
 
           Write-Host "Preparing Windows..."
 
-          # RDP USER
           $UserName = "3NB"
-          $PasswordPlain = "roblox"
+
+          # غيّر كلمة المرور هذه قبل التشغيل
+          $PasswordPlain = "511"
           $Password = ConvertTo-SecureString $PasswordPlain -AsPlainText -Force
 
           $ExistingUser = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
@@ -51,7 +52,7 @@ jobs:
             -Member $UserName `
             -ErrorAction SilentlyContinue
 
-          # ENABLE RDP
+          # Enable RDP
           Set-ItemProperty `
             "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
             -Name "fDenyTSConnections" `
@@ -66,15 +67,16 @@ jobs:
             -DisplayGroup "Remote Desktop" `
             -ErrorAction SilentlyContinue
 
-          # PERFORMANCE / POWER
+          # Performance / power
           powercfg /change monitor-timeout-ac 0
           powercfg /change standby-timeout-ac 0
           powercfg /change hibernate-timeout-ac 0
           powercfg /hibernate off
 
+          # High performance
           powercfg /setactive SCHEME_MIN
 
-          # REDUCE VISUAL EFFECTS
+          # Reduce Windows animations/effects
           Set-ItemProperty `
             "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
             -Name "VisualFXSetting" `
@@ -87,11 +89,11 @@ jobs:
             -Value "0" `
             -ErrorAction SilentlyContinue
 
-          # DISABLE WINDOWS SEARCH INDEXING
+          # Disable indexing to reduce background CPU/disk use
           Stop-Service WSearch -Force -ErrorAction SilentlyContinue
           Set-Service WSearch -StartupType Disabled -ErrorAction SilentlyContinue
 
-          # PREVENT NORMAL AUTO-REBOOT WHILE LOGGED IN
+          # Prevent automatic reboot while logged in
           New-Item `
             "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" `
             -Force `
@@ -103,7 +105,7 @@ jobs:
             -Type DWord `
             -Value 1
 
-          Write-Host "Windows preparation complete."
+          Write-Host "Windows preparation finished."
 
 
       # ============================================================
@@ -145,12 +147,13 @@ jobs:
 
           Start-Sleep -Seconds 5
 
+          Write-Host ""
           Write-Host "Tailscale IPv4:"
           & $Tailscale ip -4
 
 
       # ============================================================
-      # 3. CHECK WINGET
+      # 3. CHECK WINGET ONLY
       # ============================================================
       - name: Check WinGet
         shell: powershell
@@ -162,73 +165,19 @@ jobs:
           $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
 
           if ($Winget) {
-              Write-Host "WinGet found."
+              Write-Host "WinGet is available."
               winget --version
           }
           else {
-              Write-Host "WinGet is not available."
-              Write-Host "OpenAI apps will be skipped if Store installation is unavailable."
+              Write-Host "WinGet is unavailable."
+              Write-Host "Continuing anyway..."
           }
 
 
       # ============================================================
-      # 4. INSTALL CHROME
+      # 4. CHATGPT APP
       # ============================================================
-      - name: Install Chrome
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-
-          if ($Winget) {
-
-              Write-Host "Installing Google Chrome..."
-
-              winget install `
-                --id Google.Chrome `
-                --exact `
-                --silent `
-                --accept-package-agreements `
-                --accept-source-agreements
-
-          }
-          else {
-              Write-Host "Skipping Chrome because WinGet is unavailable."
-          }
-
-
-      # ============================================================
-      # 5. INSTALL 7-ZIP
-      # ============================================================
-      - name: Install 7-Zip
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-
-          if ($Winget) {
-
-              Write-Host "Installing 7-Zip..."
-
-              winget install `
-                --id 7zip.7zip `
-                --exact `
-                --silent `
-                --accept-package-agreements `
-                --accept-source-agreements
-
-          }
-          else {
-              Write-Host "Skipping 7-Zip."
-          }
-
-
-      # ============================================================
-      # 6. INSTALL CHATGPT WINDOWS APP
-      # ============================================================
-      - name: Install ChatGPT Windows App
+      - name: Install ChatGPT App
         shell: powershell
         continue-on-error: true
         run: |
@@ -236,31 +185,42 @@ jobs:
 
           Write-Host ""
           Write-Host "======================================"
-          Write-Host "Installing ChatGPT Windows App"
+          Write-Host "Attempting ChatGPT Windows App"
           Write-Host "======================================"
 
           $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
 
           if (-not $Winget) {
-              Write-Host "WinGet unavailable - skipping ChatGPT."
+              Write-Host "WinGet unavailable."
+              Write-Host "Skipping ChatGPT app installation."
               exit 0
           }
 
-          winget install `
-            --id 9NT1R1C2HH7J `
-            --exact `
-            --source msstore `
-            --silent `
-            --accept-package-agreements `
-            --accept-source-agreements
+          try {
 
-          Write-Host "ChatGPT installation attempt finished."
+              winget install `
+                --id 9NT1R1C2HH7J `
+                --exact `
+                --source msstore `
+                --silent `
+                --accept-package-agreements `
+                --accept-source-agreements
+
+              Write-Host "ChatGPT installation command completed."
+
+          }
+          catch {
+
+              Write-Host "ChatGPT installation failed."
+              Write-Host "Continuing without stopping the workflow."
+
+          }
 
 
       # ============================================================
-      # 7. INSTALL CODEX
+      # 5. CODEX APP
       # ============================================================
-      - name: Install Codex
+      - name: Install Codex App
         shell: powershell
         continue-on-error: true
         run: |
@@ -268,29 +228,40 @@ jobs:
 
           Write-Host ""
           Write-Host "======================================"
-          Write-Host "Installing Codex"
+          Write-Host "Attempting Codex Windows App"
           Write-Host "======================================"
 
           $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
 
           if (-not $Winget) {
-              Write-Host "WinGet unavailable - skipping Codex."
+              Write-Host "WinGet unavailable."
+              Write-Host "Skipping Codex installation."
               exit 0
           }
 
-          winget install `
-            --id 9PLM9XGG6VKS `
-            --exact `
-            --source msstore `
-            --silent `
-            --accept-package-agreements `
-            --accept-source-agreements
+          try {
 
-          Write-Host "Codex installation attempt finished."
+              winget install `
+                --id 9PLM9XGG6VKS `
+                --exact `
+                --source msstore `
+                --silent `
+                --accept-package-agreements `
+                --accept-source-agreements
+
+              Write-Host "Codex installation command completed."
+
+          }
+          catch {
+
+              Write-Host "Codex installation failed."
+              Write-Host "Continuing without stopping the workflow."
+
+          }
 
 
       # ============================================================
-      # 8. DOWNLOAD + INSTALL ROBLOX STUDIO
+      # 6. ROBLOX STUDIO
       # ============================================================
       - name: Install Roblox Studio
         shell: powershell
@@ -304,12 +275,14 @@ jobs:
 
           $Installer = "$env:TEMP\RobloxStudioLauncherBeta.exe"
 
+          Write-Host "Downloading Roblox Studio..."
+
           Invoke-WebRequest `
             -Uri "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
             -OutFile $Installer
 
           if (-not (Test-Path $Installer)) {
-              throw "Roblox Studio installer was not downloaded."
+              throw "Roblox Studio installer download failed."
           }
 
           Write-Host "Starting Roblox Studio installer..."
@@ -321,10 +294,11 @@ jobs:
 
           $Process | Wait-Process
 
-          Write-Host "Waiting for installation..."
+          Write-Host "Waiting for Roblox Studio..."
 
           Start-Sleep -Seconds 15
 
+          # Search for Studio
           $Studio = Get-ChildItem `
             "$env:LOCALAPPDATA\Roblox\Versions\*\RobloxStudioBeta.exe" `
             -File `
@@ -350,7 +324,7 @@ jobs:
           Write-Host "Roblox Studio found:"
           Write-Host $Studio.FullName
 
-          # DESKTOP SHORTCUT
+          # Create desktop shortcut
           $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
 
           $Shell = New-Object -ComObject WScript.Shell
@@ -367,25 +341,30 @@ jobs:
 
 
       # ============================================================
-      # 9. CREATE CHATGPT WEB FALLBACK SHORTCUT
+      # 7. CHATGPT WEB FALLBACK
       # ============================================================
-      - name: Create ChatGPT fallback
+      - name: Create ChatGPT Web Shortcut
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
 
           $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
 
-          $Chrome = @(
+          # Chrome should already exist on the GitHub runner.
+          $ChromePaths = @(
               "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
-              "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
-          ) |
-          Where-Object {
-              Test-Path $_
-          } |
-          Select-Object -First 1
+              "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+              "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+              "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+          )
 
-          if ($Chrome) {
+          $Browser = $ChromePaths |
+            Where-Object {
+                Test-Path $_
+            } |
+            Select-Object -First 1
+
+          if ($Browser) {
 
               $Shell = New-Object -ComObject WScript.Shell
 
@@ -393,23 +372,23 @@ jobs:
                   "$Desktop\ChatGPT Web.lnk"
               )
 
-              $Shortcut.TargetPath = $Chrome
+              $Shortcut.TargetPath = $Browser
               $Shortcut.Arguments = "https://chatgpt.com/"
-              $Shortcut.WorkingDirectory = Split-Path $Chrome
+              $Shortcut.WorkingDirectory = Split-Path $Browser
               $Shortcut.Save()
 
-              Write-Host "ChatGPT Web fallback shortcut created."
+              Write-Host "ChatGPT Web shortcut created."
 
           }
           else {
 
-              Write-Host "Chrome was not found."
+              Write-Host "No browser found."
 
           }
 
 
       # ============================================================
-      # 10. PERFORMANCE OPTIMIZATION
+      # 8. PERFORMANCE
       # ============================================================
       - name: Optimize performance
         shell: powershell
@@ -435,7 +414,7 @@ jobs:
                 -ErrorAction SilentlyContinue
           }
 
-          # Set Roblox Studio high priority if running
+          # Roblox Studio gets High priority when running
           Get-Process `
             -Name RobloxStudioBeta `
             -ErrorAction SilentlyContinue |
@@ -451,53 +430,55 @@ jobs:
 
 
       # ============================================================
-      # 11. SHOW CONNECTION DETAILS
+      # 9. CONNECTION INFORMATION
       # ============================================================
-      - name: Show RDP information
+      - name: Show RDP Information
         shell: powershell
         run: |
           $Tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           Write-Host ""
           Write-Host "=============================================="
-          Write-Host "             RDP IS READY"
+          Write-Host "              RDP IS READY"
           Write-Host "=============================================="
           Write-Host ""
           Write-Host "Username:"
           Write-Host "3NB"
           Write-Host ""
           Write-Host "Password:"
-          Write-Host "******"
+          Write-Host "511"
           Write-Host ""
           Write-Host "Tailscale IP:"
           & $Tailscale ip -4
           Write-Host ""
           Write-Host "=============================================="
-          Write-Host "Roblox Studio is installed."
-          Write-Host "ChatGPT/Codex installation was attempted."
+          Write-Host "Roblox Studio: INSTALLED"
+          Write-Host "ChatGPT: ATTEMPTED"
+          Write-Host "Codex: ATTEMPTED"
           Write-Host "=============================================="
 
 
       # ============================================================
-      # 12. KEEP RUNNER ALIVE
+      # 10. KEEP RUNNER ALIVE
       # ============================================================
-      - name: Keep runner alive
+      - name: Keep Runner Alive
         shell: powershell
         run: |
           Write-Host ""
           Write-Host "=============================================="
-          Write-Host "       RUNNER IS NOW READY"
+          Write-Host "             RUNNER IS READY"
           Write-Host "=============================================="
           Write-Host ""
-          Write-Host "Roblox Studio: READY"
-          Write-Host "RDP: READY"
-          Write-Host "Tailscale: READY"
-          Write-Host "ChatGPT/Codex: INSTALL ATTEMPTED"
+          Write-Host "Roblox Studio : READY"
+          Write-Host "RDP           : READY"
+          Write-Host "Tailscale     : READY"
+          Write-Host "ChatGPT       : ATTEMPTED"
+          Write-Host "Codex         : ATTEMPTED"
           Write-Host ""
 
           while ($true) {
 
-              # Keep Roblox Studio priority high
+              # Keep Roblox Studio at high priority
               Get-Process `
                 -Name RobloxStudioBeta `
                 -ErrorAction SilentlyContinue |
@@ -509,7 +490,7 @@ jobs:
                     catch {}
                 }
 
-              Start-Sleep -Seconds 9999999
+              Start-Sleep -Seconds 99999
 
               Write-Host "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Runner alive"
           }
