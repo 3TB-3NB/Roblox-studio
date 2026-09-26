@@ -11,13 +11,13 @@ jobs:
     steps:
 
       # =========================================================
-      # 1. إعداد Windows + إنشاء حساب RDP
+      # 1. إنشاء حساب RDP + تفعيل Remote Desktop
       # =========================================================
       - name: Setup Windows RDP
         shell: powershell
         run: |
           $UserName = "3NB"
-          $PasswordPlain = "aboatb"
+          $PasswordPlain = "aboatb2026!"
 
           Write-Host "Creating RDP user..."
 
@@ -42,8 +42,15 @@ jobs:
                 -AccountNeverExpires:$true
           }
 
-          Add-LocalGroupMember -Group "Administrators" -Member $UserName -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $UserName -ErrorAction SilentlyContinue
+          Add-LocalGroupMember `
+            -Group "Administrators" `
+            -Member $UserName `
+            -ErrorAction SilentlyContinue
+
+          Add-LocalGroupMember `
+            -Group "Remote Desktop Users" `
+            -Member $UserName `
+            -ErrorAction SilentlyContinue
 
           Write-Host "Enabling Remote Desktop..."
 
@@ -52,53 +59,47 @@ jobs:
             -Name "fDenyTSConnections" `
             -Value 0
 
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop"
 
-          # Require Network Level Authentication
           Set-ItemProperty `
             -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
             -Name "UserAuthentication" `
             -Value 1
 
-          Write-Host "RDP user ready."
-          Write-Host "Username: $UserName"
-          Write-Host "Password: $PasswordPlain"
+          Write-Host "================================"
+          Write-Host "RDP USER READY"
+          Write-Host "Username: 3NB"
+          Write-Host "Password: aboatb2026!"
+          Write-Host "================================"
 
 
       # =========================================================
-      # 2. تحسين Windows للأداء
+      # 2. تحسين أداء Windows
       # =========================================================
       - name: Windows Performance Optimization
         shell: powershell
         run: |
           Write-Host "Optimizing Windows..."
 
-          # High Performance power plan
           powercfg /setactive SCHEME_MIN
 
-          # Disable sleep / hibernate
           powercfg /change -standby-timeout-ac 0
           powercfg /change -hibernate-timeout-ac 0
-
-          # Disable hibernation
           powercfg /hibernate off
 
-          # Reduce visual effects
           Set-ItemProperty `
             -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
             -Name "VisualFXSetting" `
             -Type DWord `
             -Value 2
 
-          # Disable Windows Search service
           Stop-Service WSearch -Force -ErrorAction SilentlyContinue
           Set-Service WSearch -StartupType Disabled -ErrorAction SilentlyContinue
 
-          # Disable SysMain
           Stop-Service SysMain -Force -ErrorAction SilentlyContinue
           Set-Service SysMain -StartupType Disabled -ErrorAction SilentlyContinue
 
-          # RDP optimizations
           New-Item `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
             -Force | Out-Null
@@ -161,14 +162,16 @@ jobs:
               exit 1
           }
 
-          Write-Host "Connecting Tailscale..."
-
           if ([string]::IsNullOrWhiteSpace($env:TS_AUTH_KEY)) {
               Write-Error "TS_AUTH_KEY secret is missing."
               exit 1
           }
 
-          & $Tailscale up --authkey="$env:TS_AUTH_KEY" --hostname="github-rdp-v6"
+          Write-Host "Connecting Tailscale..."
+
+          & $Tailscale up `
+            --authkey="$env:TS_AUTH_KEY" `
+            --hostname="github-rdp-v6"
 
           Start-Sleep -Seconds 5
 
@@ -198,7 +201,7 @@ jobs:
 
 
       # =========================================================
-      # 5. إعداد ChatGPT
+      # 5. محاولة تثبيت ChatGPT
       # =========================================================
       - name: Install ChatGPT
         shell: powershell
@@ -231,7 +234,7 @@ jobs:
 
 
       # =========================================================
-      # 6. إعداد Codex
+      # 6. محاولة تثبيت Codex
       # =========================================================
       - name: Install Codex
         shell: powershell
@@ -264,7 +267,7 @@ jobs:
 
 
       # =========================================================
-      # 7. اختصار ChatGPT للمتصفح الموجود
+      # 7. إنشاء اختصار ChatGPT
       # =========================================================
       - name: Create ChatGPT Shortcut
         shell: powershell
@@ -289,6 +292,7 @@ jobs:
           }
 
           if ($Chrome) {
+
               $ShortcutPath = Join-Path $Desktop "ChatGPT.lnk"
 
               $Shell = New-Object -ComObject WScript.Shell
@@ -302,6 +306,7 @@ jobs:
               $Shortcut.Save()
 
               Write-Host "ChatGPT shortcut created."
+
           }
           else {
               Write-Host "Chrome was not found."
@@ -310,71 +315,13 @@ jobs:
 
 
       # =========================================================
-      # 8. إعداد Roblox Studio shortcut
-      # =========================================================
-      - name: Prepare Roblox Studio Shortcut
-        shell: powershell
-        run: |
-          Write-Host "Preparing Roblox Studio shortcut..."
-
-          $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
-
-          $ShortcutPath = Join-Path $Desktop "Roblox Studio.lnk"
-
-          $RobloxPaths = @(
-              "C:\Program Files (x86)\Roblox\Versions",
-              "$env:LOCALAPPDATA\Roblox\Versions"
-          )
-
-          $RobloxExe = $null
-
-          foreach ($BasePath in $RobloxPaths) {
-
-              if (Test-Path $BasePath) {
-
-                  $Found = Get-ChildItem `
-                    -Path $BasePath `
-                    -Filter "RobloxStudioBeta.exe" `
-                    -Recurse `
-                    -ErrorAction SilentlyContinue |
-                    Select-Object -First 1
-
-                  if ($Found) {
-                      $RobloxExe = $Found.FullName
-                      break
-                  }
-              }
-          }
-
-          if ($RobloxExe) {
-
-              $Shell = New-Object -ComObject WScript.Shell
-              $Shortcut = $Shell.CreateShortcut($ShortcutPath)
-
-              $Shortcut.TargetPath = $RobloxExe
-              $Shortcut.WorkingDirectory = Split-Path $RobloxExe
-              $Shortcut.Description = "Roblox Studio"
-
-              $Shortcut.Save()
-
-              Write-Host "Roblox Studio shortcut created."
-
-          }
-          else {
-              Write-Host "Roblox Studio is not installed yet."
-              Write-Host "Shortcut will be created after installation."
-          }
-
-
-      # =========================================================
-      # 9. تنظيف الذاكرة والعمليات
+      # 8. تنظيف إضافي
       # =========================================================
       - name: Final Windows Cleanup
         shell: powershell
         run: |
           Write-Host "Final cleanup..."
 
-          # Stop unnecessary processes if present
           $Processes = @(
               "OneDrive",
               "Teams",
@@ -387,23 +334,11 @@ jobs:
                 Stop-Process -Force -ErrorAction SilentlyContinue
           }
 
-          # Try to make Roblox Studio high priority if already running
-          Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue |
-            ForEach-Object {
-              try {
-                  $_.PriorityClass = "High"
-                  Write-Host "Roblox Studio priority set to High."
-              }
-              catch {
-                  Write-Host "Could not change Roblox Studio priority."
-              }
-            }
-
           Write-Host "Cleanup complete."
 
 
       # =========================================================
-      # 10. ROBLOX STUDIO - آخر تثبيت
+      # 9. ROBLOX STUDIO - آخر تثبيت
       # =========================================================
       - name: Install Roblox Studio
         shell: powershell
@@ -474,8 +409,8 @@ jobs:
           Write-Host "Roblox Studio found:"
           Write-Host $RobloxExe
 
-          # Create desktop shortcut now that Studio exists
           $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+
           $ShortcutPath = Join-Path $Desktop "Roblox Studio.lnk"
 
           $Shell = New-Object -ComObject WScript.Shell
@@ -495,7 +430,7 @@ jobs:
 
 
       # =========================================================
-      # 11. معلومات الاتصال
+      # 10. معلومات الاتصال
       # =========================================================
       - name: Show RDP Information
         shell: powershell
@@ -506,9 +441,9 @@ jobs:
           Write-Host "=========================================="
           Write-Host ""
           Write-Host "Username: 3NB"
-          Write-Host "Password: aboatb"
+          Write-Host "Password: aboatb2026!"
           Write-Host ""
-          Write-Host "Use the Tailscale IP shown below:"
+          Write-Host "Tailscale IPv4:"
           Write-Host ""
 
           $Tailscale = "C:\Program Files\Tailscale\tailscale.exe"
@@ -524,7 +459,7 @@ jobs:
 
 
       # =========================================================
-      # 12. إبقاء السيرفر شغال
+      # 11. إبقاء السيرفر شغال
       # =========================================================
       - name: Keep Runner Alive
         shell: powershell
@@ -533,7 +468,7 @@ jobs:
           Write-Host "RDP SERVER IS READY"
           Write-Host "=========================================="
           Write-Host "Username: 3NB"
-          Write-Host "Password: aboatb"
+          Write-Host "Password: aboatb2026!"
           Write-Host ""
           Write-Host "Runner will stay alive until timeout."
           Write-Host "=========================================="
