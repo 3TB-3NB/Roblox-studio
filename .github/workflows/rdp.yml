@@ -1,4 +1,4 @@
-name: Roblox Studio RDP
+name: Roblox Studio RDP V3 - ChatGPT + Codex
 
 on:
   workflow_dispatch:
@@ -6,273 +6,509 @@ on:
 jobs:
   rdp:
     runs-on: windows-2025
-    timeout-minutes: 10000
+    timeout-minutes: 350
 
     steps:
 
-      # ==========================================
-      # 1. تجهيز Windows للـRDP
-      # ==========================================
-      - name: Configure Windows RDP
+      # ============================================================
+      # 1. PREPARE WINDOWS
+      # ============================================================
+      - name: Prepare Windows for stable RDP
         shell: powershell
         run: |
-          Write-Host "Configuring Windows RDP..."
+          $ErrorActionPreference = 'Continue'
 
-          Set-ItemProperty `
-            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
-            -Name "fDenyTSConnections" `
-            -Value 0
+          Write-Host "Preparing Windows..."
 
-          Enable-NetFirewallRule `
-            -DisplayGroup "Remote Desktop"
+          # ----------------------------
+          # RDP USER
+          # ----------------------------
+          $UserName = "3NB"
+          $PasswordPlain = "511"
+          $Password = ConvertTo-SecureString $PasswordPlain -AsPlainText -Force
 
-          $password = ConvertTo-SecureString `
-            "RobloxRDP2026!" `
-            -AsPlainText `
-            -Force
+          $ExistingUser = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
 
-          if (-not (Get-LocalUser -Name "rdpuser" -ErrorAction SilentlyContinue)) {
+          if (-not $ExistingUser) {
               New-LocalUser `
-                -Name "rdpuser" `
-                -Password $password `
-                -PasswordNeverExpires
+                -Name $UserName `
+                -Password $Password `
+                -AccountNeverExpires `
+                -PasswordNeverExpires `
+                -Description "Remote Desktop User"
+          }
+          else {
+              Set-LocalUser `
+                -Name $UserName `
+                -Password $Password
           }
 
           Add-LocalGroupMember `
             -Group "Administrators" `
-            -Member "rdpuser" `
+            -Member $UserName `
             -ErrorAction SilentlyContinue
 
-          Set-Service `
-            -Name TermService `
-            -StartupType Automatic
+          Add-LocalGroupMember `
+            -Group "Remote Desktop Users" `
+            -Member $UserName `
+            -ErrorAction SilentlyContinue
 
-          Start-Service TermService
+          # ----------------------------
+          # ENABLE RDP
+          # ----------------------------
+          Set-ItemProperty `
+            "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Name "fDenyTSConnections" `
+            -Value 0
 
-          Write-Host "RDP configured."
+          Set-ItemProperty `
+            "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            -Name "UserAuthentication" `
+            -Value 1
 
-      # ==========================================
-      # 2. تثبيت Tailscale
-      # ==========================================
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop" `
+            -ErrorAction SilentlyContinue
+
+          # ----------------------------
+          # PERFORMANCE
+          # ----------------------------
+          powercfg /change monitor-timeout-ac 0
+          powercfg /change standby-timeout-ac 0
+          powercfg /change hibernate-timeout-ac 0
+          powercfg /hibernate off
+
+          powercfg /setactive SCHEME_MIN
+
+          # Disable unnecessary indexing
+          Stop-Service WSearch -Force -ErrorAction SilentlyContinue
+          Set-Service WSearch -StartupType Disabled -ErrorAction SilentlyContinue
+
+          # Reduce visual effects
+          Set-ItemProperty `
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
+            -Name "VisualFXSetting" `
+            -Value 2 `
+            -ErrorAction SilentlyContinue
+
+          Set-ItemProperty `
+            "HKCU:\Control Panel\Desktop" `
+            -Name "MenuShowDelay" `
+            -Value "0" `
+            -ErrorAction SilentlyContinue
+
+          # Prevent automatic reboot while logged in
+          New-Item `
+            "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" `
+            -Force `
+            | Out-Null
+
+          Set-ItemProperty `
+            "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" `
+            -Name "NoAutoRebootWithLoggedOnUsers" `
+            -Type DWord `
+            -Value 1
+
+          Write-Host "Windows preparation complete."
+
+
+      # ============================================================
+      # 2. TAILSCALE
+      # ============================================================
       - name: Install Tailscale
-        shell: powershell
-        run: |
-          Write-Host "Installing Tailscale..."
-
-          $installer = "$env:TEMP\tailscale.msi"
-
-          Invoke-WebRequest `
-            -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" `
-            -OutFile $installer
-
-          Start-Process `
-            msiexec.exe `
-            -ArgumentList "/i `"$installer`" /qn /norestart" `
-            -Wait
-
-          Write-Host "Tailscale installed."
-
-      # ==========================================
-      # 3. الاتصال بشبكة Tailscale
-      # ==========================================
-      - name: Connect Tailscale
         shell: powershell
         env:
           TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
         run: |
-          Write-Host "Connecting to Tailscale..."
+          $ErrorActionPreference = "Stop"
 
-          & "C:\Program Files\Tailscale\tailscale.exe" up `
+          Write-Host "Downloading Tailscale..."
+
+          $Installer = "$env:TEMP\tailscale.msi"
+
+          Invoke-WebRequest `
+            -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" `
+            -OutFile $Installer
+
+          Write-Host "Installing Tailscale..."
+
+          Start-Process `
+            msiexec.exe `
+            -ArgumentList "/i `"$Installer`" /qn /norestart" `
+            -Wait
+
+          $Tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
+
+          if (-not (Test-Path $Tailscale)) {
+              throw "Tailscale installation failed."
+          }
+
+          Write-Host "Connecting Tailscale..."
+
+          & $Tailscale up `
             --auth-key="$env:TS_AUTH_KEY" `
-            --hostname="roblox-rdp"
+            --hostname="github-roblox-$env:GITHUB_RUN_ID"
 
           Start-Sleep -Seconds 5
 
-          $ip = & `
-            "C:\Program Files\Tailscale\tailscale.exe" `
-            ip -4
+          Write-Host "Tailscale IP:"
+          & $Tailscale ip -4
 
-          Write-Host ""
-          Write-Host "======================================"
-          Write-Host "        ROBLOX RDP IS READY"
-          Write-Host "======================================"
-          Write-Host ""
-          Write-Host "RDP IP:"
-          Write-Host $ip
-          Write-Host ""
-          Write-Host "USERNAME:"
-          Write-Host "KRB"
-          Write-Host ""
-          Write-Host "PASSWORD:"
-          Write-Host "KKRRBB"
-          Write-Host ""
-          Write-Host "======================================"
 
-      # ==========================================
-      # 4. تحميل أحدث Roblox Studio
-      # ==========================================
-      - name: Download Roblox Studio
+      # ============================================================
+      # 3. UPDATE WINGET
+      # ============================================================
+      - name: Prepare WinGet
         shell: powershell
         run: |
-          Write-Host "Downloading latest Roblox Studio..."
+          $ErrorActionPreference = "Continue"
 
-          $installer = "$env:TEMP\RobloxStudioLauncherBeta.exe"
+          Write-Host "Checking WinGet..."
 
-          Invoke-WebRequest `
-            -Uri "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
-            -OutFile $installer
+          winget --version
 
-          if (!(Test-Path $installer)) {
-              throw "Roblox Studio download failed."
-          }
+          winget source reset --force
+          winget source update --accept-source-agreements
 
-          $size = (Get-Item $installer).Length / 1MB
+          Write-Host "WinGet ready."
 
-          Write-Host "Downloaded Roblox Studio."
-          Write-Host "Installer size: $size MB"
 
-      # ==========================================
-      # 5. تثبيت Roblox Studio
-      # ==========================================
+      # ============================================================
+      # 4. INSTALL GOOGLE CHROME
+      # ============================================================
+      - name: Install Chrome
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "Installing Google Chrome..."
+
+          winget install `
+            --id Google.Chrome `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
+
+          Write-Host "Chrome installation finished."
+
+
+      # ============================================================
+      # 5. INSTALL 7-ZIP
+      # ============================================================
+      - name: Install 7-Zip
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          winget install `
+            --id 7zip.7zip `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
+
+          Write-Host "7-Zip installed."
+
+
+      # ============================================================
+      # 6. INSTALL CHATGPT WINDOWS APP
+      # ============================================================
+      - name: Install ChatGPT Windows App
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "=========================================="
+          Write-Host "Installing official ChatGPT Windows App"
+          Write-Host "=========================================="
+
+          winget install `
+            --id 9NT1R1C2HH7J `
+            --exact `
+            --source msstore `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
+
+          Start-Sleep -Seconds 10
+
+          Write-Host "ChatGPT installation command finished."
+
+
+      # ============================================================
+      # 7. INSTALL CODEX
+      # ============================================================
+      - name: Install Codex Windows App
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "=========================================="
+          Write-Host "Installing official Codex Windows App"
+          Write-Host "=========================================="
+
+          winget install `
+            --id 9PLM9XGG6VKS `
+            --exact `
+            --source msstore `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
+
+          Start-Sleep -Seconds 10
+
+          Write-Host "Codex installation command finished."
+
+
+      # ============================================================
+      # 8. INSTALL ROBLOX STUDIO
+      # ============================================================
       - name: Install Roblox Studio
         shell: powershell
         run: |
-          Write-Host "Installing Roblox Studio..."
+          $ErrorActionPreference = "Stop"
 
-          $installer = "$env:TEMP\RobloxStudioLauncherBeta.exe"
+          Write-Host "=========================================="
+          Write-Host "Downloading Roblox Studio"
+          Write-Host "=========================================="
 
-          Start-Process `
-            -FilePath $installer `
+          $Installer = "$env:TEMP\RobloxStudioLauncherBeta.exe"
+
+          Invoke-WebRequest `
+            -Uri "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
+            -OutFile $Installer
+
+          if (-not (Test-Path $Installer)) {
+              throw "Roblox Studio installer was not downloaded."
+          }
+
+          Write-Host "Starting Roblox Studio installer..."
+
+          $Process = Start-Process `
+            -FilePath $Installer `
             -ArgumentList "-install" `
-            -Wait
+            -PassThru
 
-          Write-Host "Waiting for Studio installation..."
+          $Process | Wait-Process
+
+          Write-Host "Waiting for Roblox Studio files..."
 
           Start-Sleep -Seconds 15
 
-          $studio = Get-ChildItem `
-            "$env:LOCALAPPDATA\Roblox\Versions" `
-            -Filter "RobloxStudioBeta.exe" `
-            -Recurse `
+          $Studio = Get-ChildItem `
+            "$env:LOCALAPPDATA\Roblox\Versions\*\RobloxStudioBeta.exe" `
+            -File `
             -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
-          if (!$studio) {
-              Write-Host ""
-              Write-Host "Studio executable was not found."
-              Write-Host ""
-              Write-Host "Roblox folder contents:"
+          if (-not $Studio) {
 
-              if (Test-Path "$env:LOCALAPPDATA\Roblox") {
-                  Get-ChildItem `
-                    "$env:LOCALAPPDATA\Roblox" `
-                    -Recurse `
-                    -ErrorAction SilentlyContinue |
-                    Select-Object FullName
-              }
-
-              throw "Roblox Studio installation failed."
+              $Studio = Get-ChildItem `
+                "$env:ProgramFiles\Roblox\Versions\*\RobloxStudioBeta.exe" `
+                -File `
+                -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1
           }
 
-          Write-Host ""
-          Write-Host "======================================"
-          Write-Host "Roblox Studio installed successfully."
-          Write-Host "======================================"
-          Write-Host ""
-          Write-Host "Studio:"
-          Write-Host $studio.FullName
+          if (-not $Studio) {
+              throw "RobloxStudioBeta.exe was not found."
+          }
 
-      # ==========================================
-      # 6. تحسين إعدادات Windows للـRDP
-      # ==========================================
-      - name: Optimize Windows for RDP
+          Write-Host "Roblox Studio:"
+          Write-Host $Studio.FullName
+
+          # Create Desktop shortcut
+          $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+
+          $Shell = New-Object -ComObject WScript.Shell
+
+          $Shortcut = $Shell.CreateShortcut(
+              "$Desktop\Roblox Studio.lnk"
+          )
+
+          $Shortcut.TargetPath = $Studio.FullName
+          $Shortcut.WorkingDirectory = Split-Path $Studio.FullName
+          $Shortcut.Save()
+
+          Write-Host "Roblox Studio shortcut created."
+
+
+      # ============================================================
+      # 9. CREATE CHATGPT SHORTCUT
+      # ============================================================
+      - name: Create ChatGPT shortcut
         shell: powershell
         run: |
-          Write-Host "Optimizing Windows..."
+          $ErrorActionPreference = "Continue"
 
-          # Disable visual effects
-          Set-ItemProperty `
-            -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
-            -Name VisualFXSetting `
-            -Value 2 `
-            -ErrorAction SilentlyContinue
+          $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
 
-          # Disable transparency
-          Set-ItemProperty `
-            -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" `
-            -Name EnableTransparency `
-            -Value 0 `
-            -ErrorAction SilentlyContinue
+          $ChatGPTLocations = @(
+              "$env:LOCALAPPDATA\Microsoft\WindowsApps\ChatGPT.exe",
+              "$env:LOCALAPPDATA\Programs\ChatGPT\ChatGPT.exe",
+              "$env:ProgramFiles\ChatGPT\ChatGPT.exe"
+          )
 
-          # Disable animations
-          Set-ItemProperty `
-            -Path "HKCU:\Control Panel\Desktop\WindowMetrics" `
-            -Name MinAnimate `
-            -Value 0 `
-            -ErrorAction SilentlyContinue
-
-          Write-Host "Windows optimization complete."
-
-      # ==========================================
-      # 7. البحث عن Studio وتجهيزه
-      # ==========================================
-      - name: Prepare Roblox Studio
-        shell: powershell
-        run: |
-          Write-Host "Finding Roblox Studio..."
-
-          $studio = Get-ChildItem `
-            "$env:LOCALAPPDATA\Roblox\Versions" `
-            -Filter "RobloxStudioBeta.exe" `
-            -Recurse `
-            -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending |
+          $ChatGPT = $ChatGPTLocations |
+            Where-Object { Test-Path $_ } |
             Select-Object -First 1
 
-          if (!$studio) {
-              throw "Roblox Studio executable not found."
+          if ($ChatGPT) {
+
+              $Shell = New-Object -ComObject WScript.Shell
+
+              $Shortcut = $Shell.CreateShortcut(
+                  "$Desktop\ChatGPT.lnk"
+              )
+
+              $Shortcut.TargetPath = $ChatGPT
+              $Shortcut.Save()
+
+              Write-Host "ChatGPT desktop shortcut created."
+          }
+          else {
+              Write-Host "ChatGPT executable was not found yet."
+              Write-Host "The app may still be registered through Microsoft Store."
           }
 
-          Write-Host "Studio path:"
-          Write-Host $studio.FullName
 
-          # Create desktop shortcut
-          $desktop = [Environment]::GetFolderPath("Desktop")
+      # ============================================================
+      # 10. CREATE CODEX SHORTCUT
+      # ============================================================
+      - name: Create Codex shortcut
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
 
-          $shortcutPath = Join-Path `
-            $desktop `
-            "Roblox Studio.lnk"
+          $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
 
-          $shell = New-Object -ComObject WScript.Shell
+          $CodexLocations = @(
+              "$env:LOCALAPPDATA\Microsoft\WindowsApps\Codex.exe",
+              "$env:LOCALAPPDATA\Programs\Codex\Codex.exe",
+              "$env:ProgramFiles\Codex\Codex.exe"
+          )
 
-          $shortcut = $shell.CreateShortcut($shortcutPath)
+          $Codex = $CodexLocations |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
 
-          $shortcut.TargetPath = $studio.FullName
-          $shortcut.WorkingDirectory = $studio.DirectoryName
-          $shortcut.Description = "Roblox Studio"
+          if ($Codex) {
 
-          $shortcut.Save()
+              $Shell = New-Object -ComObject WScript.Shell
 
-          Write-Host "Desktop shortcut created."
+              $Shortcut = $Shell.CreateShortcut(
+                  "$Desktop\Codex.lnk"
+              )
 
-      # ==========================================
-      # 8. إبقاء الـWindows شغال
-      # ==========================================
-      - name: Keep Windows RDP Alive
+              $Shortcut.TargetPath = $Codex
+              $Shortcut.Save()
+
+              Write-Host "Codex desktop shortcut created."
+          }
+          else {
+              Write-Host "Codex executable path was not found."
+              Write-Host "The application can still be available from Start Menu."
+          }
+
+
+      # ============================================================
+      # 11. PERFORMANCE CLEANUP
+      # ============================================================
+      - name: Optimize background processes
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "Cleaning unnecessary background processes..."
+
+          $Processes = @(
+              "OneDrive",
+              "MicrosoftTeams",
+              "Widgets",
+              "SearchHost"
+          )
+
+          foreach ($Name in $Processes) {
+
+              Get-Process `
+                -Name $Name `
+                -ErrorAction SilentlyContinue |
+                Stop-Process `
+                -Force `
+                -ErrorAction SilentlyContinue
+          }
+
+          # Roblox Studio priority
+          Get-Process `
+            -Name RobloxStudioBeta `
+            -ErrorAction SilentlyContinue |
+            ForEach-Object {
+
+                try {
+                    $_.PriorityClass = "High"
+                }
+                catch {}
+            }
+
+          Write-Host "Performance cleanup complete."
+
+
+      # ============================================================
+      # 12. SHOW CONNECTION INFORMATION
+      # ============================================================
+      - name: Show RDP information
+        shell: powershell
+        run: |
+          $Tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
+
+          Write-Host ""
+          Write-Host "=============================================="
+          Write-Host "          ROBLOX RDP IS READY"
+          Write-Host "=============================================="
+          Write-Host ""
+          Write-Host "Username:"
+          Write-Host "3NB"
+          Write-Host ""
+          Write-Host "Password:"
+          Write-Host "511"
+          Write-Host ""
+          Write-Host "Tailscale IP:"
+          & $Tailscale ip -4
+          Write-Host ""
+          Write-Host "=============================================="
+          Write-Host "Keep this workflow running."
+          Write-Host "=============================================="
+
+
+      # ============================================================
+      # 13. KEEP RUNNER ALIVE
+      # ============================================================
+      - name: Keep runner alive
         shell: powershell
         run: |
           Write-Host ""
-          Write-Host "======================================"
-          Write-Host "      WINDOWS IS READY"
-          Write-Host "======================================"
-          Write-Host ""
-          Write-Host "Connect using Windows App."
-          Write-Host ""
-          Write-Host "Keep this job running while using RDP."
-          Write-Host ""
+          Write-Host "=============================================="
+          Write-Host "Everything is ready."
+          Write-Host "Roblox Studio + ChatGPT + Codex"
+          Write-Host "=============================================="
 
           while ($true) {
-              Write-Host "RDP ACTIVE - $(Get-Date)"
-              Start-Sleep -Seconds 99999
+
+              Get-Process `
+                -Name RobloxStudioBeta `
+                -ErrorAction SilentlyContinue |
+                ForEach-Object {
+
+                    try {
+                        $_.PriorityClass = "High"
+                    }
+                    catch {}
+                }
+
+              Start-Sleep -Seconds 9999999
+
+              Write-Host "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Runner alive"
           }
