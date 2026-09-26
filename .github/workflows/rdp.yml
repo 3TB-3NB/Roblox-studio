@@ -104,7 +104,7 @@ jobs:
           Write-Host "KRB"
           Write-Host ""
           Write-Host "PASSWORD:"
-          Write-Host "511"
+          Write-Host "KKRRBB"
           Write-Host ""
           Write-Host "======================================"
 
