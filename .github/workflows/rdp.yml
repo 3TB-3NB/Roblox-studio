@@ -101,10 +101,10 @@ jobs:
           Write-Host $ip
           Write-Host ""
           Write-Host "USERNAME:"
-          Write-Host "3NB"
+          Write-Host "rdpuser"
           Write-Host ""
           Write-Host "PASSWORD:"
-          Write-Host "511"
+          Write-Host "RobloxRDP2026!"
           Write-Host ""
           Write-Host "======================================"
 
