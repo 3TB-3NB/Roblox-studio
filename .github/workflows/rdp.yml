@@ -1,4 +1,4 @@
-name: Roblox Studio RDP V3 - ChatGPT + Codex
+name: Roblox Studio RDP V4
 
 on:
   workflow_dispatch:
@@ -11,18 +11,16 @@ jobs:
     steps:
 
       # ============================================================
-      # 1. PREPARE WINDOWS
+      # 1. PREPARE WINDOWS + RDP
       # ============================================================
-      - name: Prepare Windows for stable RDP
+      - name: Prepare Windows
         shell: powershell
         run: |
-          $ErrorActionPreference = 'Continue'
+          $ErrorActionPreference = "Continue"
 
           Write-Host "Preparing Windows..."
 
-          # ----------------------------
           # RDP USER
-          # ----------------------------
           $UserName = "3NB"
           $PasswordPlain = "roblox"
           $Password = ConvertTo-SecureString $PasswordPlain -AsPlainText -Force
@@ -53,9 +51,7 @@ jobs:
             -Member $UserName `
             -ErrorAction SilentlyContinue
 
-          # ----------------------------
           # ENABLE RDP
-          # ----------------------------
           Set-ItemProperty `
             "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
             -Name "fDenyTSConnections" `
@@ -70,9 +66,7 @@ jobs:
             -DisplayGroup "Remote Desktop" `
             -ErrorAction SilentlyContinue
 
-          # ----------------------------
-          # PERFORMANCE
-          # ----------------------------
+          # PERFORMANCE / POWER
           powercfg /change monitor-timeout-ac 0
           powercfg /change standby-timeout-ac 0
           powercfg /change hibernate-timeout-ac 0
@@ -80,11 +74,7 @@ jobs:
 
           powercfg /setactive SCHEME_MIN
 
-          # Disable unnecessary indexing
-          Stop-Service WSearch -Force -ErrorAction SilentlyContinue
-          Set-Service WSearch -StartupType Disabled -ErrorAction SilentlyContinue
-
-          # Reduce visual effects
+          # REDUCE VISUAL EFFECTS
           Set-ItemProperty `
             "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
             -Name "VisualFXSetting" `
@@ -97,7 +87,11 @@ jobs:
             -Value "0" `
             -ErrorAction SilentlyContinue
 
-          # Prevent automatic reboot while logged in
+          # DISABLE WINDOWS SEARCH INDEXING
+          Stop-Service WSearch -Force -ErrorAction SilentlyContinue
+          Set-Service WSearch -StartupType Disabled -ErrorAction SilentlyContinue
+
+          # PREVENT NORMAL AUTO-REBOOT WHILE LOGGED IN
           New-Item `
             "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" `
             -Force `
@@ -151,46 +145,57 @@ jobs:
 
           Start-Sleep -Seconds 5
 
-          Write-Host "Tailscale IP:"
+          Write-Host "Tailscale IPv4:"
           & $Tailscale ip -4
 
 
       # ============================================================
-      # 3. UPDATE WINGET
+      # 3. CHECK WINGET
       # ============================================================
-      - name: Prepare WinGet
+      - name: Check WinGet
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
 
           Write-Host "Checking WinGet..."
 
-          winget --version
+          $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
 
-          winget source reset --force
-          winget source update --accept-source-agreements
-
-          Write-Host "WinGet ready."
+          if ($Winget) {
+              Write-Host "WinGet found."
+              winget --version
+          }
+          else {
+              Write-Host "WinGet is not available."
+              Write-Host "OpenAI apps will be skipped if Store installation is unavailable."
+          }
 
 
       # ============================================================
-      # 4. INSTALL GOOGLE CHROME
+      # 4. INSTALL CHROME
       # ============================================================
       - name: Install Chrome
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
 
-          Write-Host "Installing Google Chrome..."
+          $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
 
-          winget install `
-            --id Google.Chrome `
-            --exact `
-            --silent `
-            --accept-package-agreements `
-            --accept-source-agreements
+          if ($Winget) {
 
-          Write-Host "Chrome installation finished."
+              Write-Host "Installing Google Chrome..."
+
+              winget install `
+                --id Google.Chrome `
+                --exact `
+                --silent `
+                --accept-package-agreements `
+                --accept-source-agreements
+
+          }
+          else {
+              Write-Host "Skipping Chrome because WinGet is unavailable."
+          }
 
 
       # ============================================================
@@ -201,14 +206,23 @@ jobs:
         run: |
           $ErrorActionPreference = "Continue"
 
-          winget install `
-            --id 7zip.7zip `
-            --exact `
-            --silent `
-            --accept-package-agreements `
-            --accept-source-agreements
+          $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
 
-          Write-Host "7-Zip installed."
+          if ($Winget) {
+
+              Write-Host "Installing 7-Zip..."
+
+              winget install `
+                --id 7zip.7zip `
+                --exact `
+                --silent `
+                --accept-package-agreements `
+                --accept-source-agreements
+
+          }
+          else {
+              Write-Host "Skipping 7-Zip."
+          }
 
 
       # ============================================================
@@ -216,12 +230,21 @@ jobs:
       # ============================================================
       - name: Install ChatGPT Windows App
         shell: powershell
+        continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
 
-          Write-Host "=========================================="
-          Write-Host "Installing official ChatGPT Windows App"
-          Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "Installing ChatGPT Windows App"
+          Write-Host "======================================"
+
+          $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+
+          if (-not $Winget) {
+              Write-Host "WinGet unavailable - skipping ChatGPT."
+              exit 0
+          }
 
           winget install `
             --id 9NT1R1C2HH7J `
@@ -231,22 +254,29 @@ jobs:
             --accept-package-agreements `
             --accept-source-agreements
 
-          Start-Sleep -Seconds 10
-
-          Write-Host "ChatGPT installation command finished."
+          Write-Host "ChatGPT installation attempt finished."
 
 
       # ============================================================
       # 7. INSTALL CODEX
       # ============================================================
-      - name: Install Codex Windows App
+      - name: Install Codex
         shell: powershell
+        continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
 
-          Write-Host "=========================================="
-          Write-Host "Installing official Codex Windows App"
-          Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "Installing Codex"
+          Write-Host "======================================"
+
+          $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+
+          if (-not $Winget) {
+              Write-Host "WinGet unavailable - skipping Codex."
+              exit 0
+          }
 
           winget install `
             --id 9PLM9XGG6VKS `
@@ -256,22 +286,21 @@ jobs:
             --accept-package-agreements `
             --accept-source-agreements
 
-          Start-Sleep -Seconds 10
-
-          Write-Host "Codex installation command finished."
+          Write-Host "Codex installation attempt finished."
 
 
       # ============================================================
-      # 8. INSTALL ROBLOX STUDIO
+      # 8. DOWNLOAD + INSTALL ROBLOX STUDIO
       # ============================================================
       - name: Install Roblox Studio
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "=========================================="
-          Write-Host "Downloading Roblox Studio"
-          Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "Installing Roblox Studio"
+          Write-Host "======================================"
 
           $Installer = "$env:TEMP\RobloxStudioLauncherBeta.exe"
 
@@ -292,7 +321,7 @@ jobs:
 
           $Process | Wait-Process
 
-          Write-Host "Waiting for Roblox Studio files..."
+          Write-Host "Waiting for installation..."
 
           Start-Sleep -Seconds 15
 
@@ -317,10 +346,11 @@ jobs:
               throw "RobloxStudioBeta.exe was not found."
           }
 
-          Write-Host "Roblox Studio:"
+          Write-Host ""
+          Write-Host "Roblox Studio found:"
           Write-Host $Studio.FullName
 
-          # Create Desktop shortcut
+          # DESKTOP SHORTCUT
           $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
 
           $Shell = New-Object -ComObject WScript.Shell
@@ -337,92 +367,56 @@ jobs:
 
 
       # ============================================================
-      # 9. CREATE CHATGPT SHORTCUT
+      # 9. CREATE CHATGPT WEB FALLBACK SHORTCUT
       # ============================================================
-      - name: Create ChatGPT shortcut
+      - name: Create ChatGPT fallback
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
 
           $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
 
-          $ChatGPTLocations = @(
-              "$env:LOCALAPPDATA\Microsoft\WindowsApps\ChatGPT.exe",
-              "$env:LOCALAPPDATA\Programs\ChatGPT\ChatGPT.exe",
-              "$env:ProgramFiles\ChatGPT\ChatGPT.exe"
-          )
+          $Chrome = @(
+              "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+              "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
+          ) |
+          Where-Object {
+              Test-Path $_
+          } |
+          Select-Object -First 1
 
-          $ChatGPT = $ChatGPTLocations |
-            Where-Object { Test-Path $_ } |
-            Select-Object -First 1
-
-          if ($ChatGPT) {
-
-              $Shell = New-Object -ComObject WScript.Shell
-
-              $Shortcut = $Shell.CreateShortcut(
-                  "$Desktop\ChatGPT.lnk"
-              )
-
-              $Shortcut.TargetPath = $ChatGPT
-              $Shortcut.Save()
-
-              Write-Host "ChatGPT desktop shortcut created."
-          }
-          else {
-              Write-Host "ChatGPT executable was not found yet."
-              Write-Host "The app may still be registered through Microsoft Store."
-          }
-
-
-      # ============================================================
-      # 10. CREATE CODEX SHORTCUT
-      # ============================================================
-      - name: Create Codex shortcut
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
-
-          $CodexLocations = @(
-              "$env:LOCALAPPDATA\Microsoft\WindowsApps\Codex.exe",
-              "$env:LOCALAPPDATA\Programs\Codex\Codex.exe",
-              "$env:ProgramFiles\Codex\Codex.exe"
-          )
-
-          $Codex = $CodexLocations |
-            Where-Object { Test-Path $_ } |
-            Select-Object -First 1
-
-          if ($Codex) {
+          if ($Chrome) {
 
               $Shell = New-Object -ComObject WScript.Shell
 
               $Shortcut = $Shell.CreateShortcut(
-                  "$Desktop\Codex.lnk"
+                  "$Desktop\ChatGPT Web.lnk"
               )
 
-              $Shortcut.TargetPath = $Codex
+              $Shortcut.TargetPath = $Chrome
+              $Shortcut.Arguments = "https://chatgpt.com/"
+              $Shortcut.WorkingDirectory = Split-Path $Chrome
               $Shortcut.Save()
 
-              Write-Host "Codex desktop shortcut created."
+              Write-Host "ChatGPT Web fallback shortcut created."
+
           }
           else {
-              Write-Host "Codex executable path was not found."
-              Write-Host "The application can still be available from Start Menu."
+
+              Write-Host "Chrome was not found."
+
           }
 
 
       # ============================================================
-      # 11. PERFORMANCE CLEANUP
+      # 10. PERFORMANCE OPTIMIZATION
       # ============================================================
-      - name: Optimize background processes
+      - name: Optimize performance
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
 
-          Write-Host "Cleaning unnecessary background processes..."
+          Write-Host "Optimizing background processes..."
 
           $Processes = @(
               "OneDrive",
@@ -441,7 +435,7 @@ jobs:
                 -ErrorAction SilentlyContinue
           }
 
-          # Roblox Studio priority
+          # Set Roblox Studio high priority if running
           Get-Process `
             -Name RobloxStudioBeta `
             -ErrorAction SilentlyContinue |
@@ -453,11 +447,11 @@ jobs:
                 catch {}
             }
 
-          Write-Host "Performance cleanup complete."
+          Write-Host "Performance optimization complete."
 
 
       # ============================================================
-      # 12. SHOW CONNECTION INFORMATION
+      # 11. SHOW CONNECTION DETAILS
       # ============================================================
       - name: Show RDP information
         shell: powershell
@@ -466,37 +460,44 @@ jobs:
 
           Write-Host ""
           Write-Host "=============================================="
-          Write-Host "          ROBLOX RDP IS READY"
+          Write-Host "             RDP IS READY"
           Write-Host "=============================================="
           Write-Host ""
           Write-Host "Username:"
           Write-Host "3NB"
           Write-Host ""
           Write-Host "Password:"
-          Write-Host "roblox"
+          Write-Host "******"
           Write-Host ""
           Write-Host "Tailscale IP:"
           & $Tailscale ip -4
           Write-Host ""
           Write-Host "=============================================="
-          Write-Host "Keep this workflow running."
+          Write-Host "Roblox Studio is installed."
+          Write-Host "ChatGPT/Codex installation was attempted."
           Write-Host "=============================================="
 
 
       # ============================================================
-      # 13. KEEP RUNNER ALIVE
+      # 12. KEEP RUNNER ALIVE
       # ============================================================
       - name: Keep runner alive
         shell: powershell
         run: |
           Write-Host ""
           Write-Host "=============================================="
-          Write-Host "Everything is ready."
-          Write-Host "Roblox Studio + ChatGPT + Codex"
+          Write-Host "       RUNNER IS NOW READY"
           Write-Host "=============================================="
+          Write-Host ""
+          Write-Host "Roblox Studio: READY"
+          Write-Host "RDP: READY"
+          Write-Host "Tailscale: READY"
+          Write-Host "ChatGPT/Codex: INSTALL ATTEMPTED"
+          Write-Host ""
 
           while ($true) {
 
+              # Keep Roblox Studio priority high
               Get-Process `
                 -Name RobloxStudioBeta `
                 -ErrorAction SilentlyContinue |
