@@ -1,4 +1,4 @@
-name: Windows RDP
+name: Roblox Studio RDP
 
 on:
   workflow_dispatch:
@@ -6,78 +6,273 @@ on:
 jobs:
   rdp:
     runs-on: windows-2025
-    timeout-minutes: 360
+    timeout-minutes: 350
 
     steps:
-      - name: Enable RDP
+
+      # ==========================================
+      # 1. تجهيز Windows للـRDP
+      # ==========================================
+      - name: Configure Windows RDP
         shell: powershell
         run: |
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Write-Host "Configuring Windows RDP..."
 
-          $password = ConvertTo-SecureString "RobloxRDP2026!" -AsPlainText -Force
+          Set-ItemProperty `
+            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Name "fDenyTSConnections" `
+            -Value 0
+
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop"
+
+          $password = ConvertTo-SecureString `
+            "RobloxRDP2026!" `
+            -AsPlainText `
+            -Force
 
           if (-not (Get-LocalUser -Name "rdpuser" -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name "rdpuser" -Password $password -PasswordNeverExpires
+              New-LocalUser `
+                -Name "rdpuser" `
+                -Password $password `
+                -PasswordNeverExpires
           }
 
-          Add-LocalGroupMember -Group "Administrators" -Member "rdpuser"
+          Add-LocalGroupMember `
+            -Group "Administrators" `
+            -Member "rdpuser" `
+            -ErrorAction SilentlyContinue
 
-          Set-Service -Name TermService -StartupType Automatic
+          Set-Service `
+            -Name TermService `
+            -StartupType Automatic
+
           Start-Service TermService
 
+          Write-Host "RDP configured."
+
+      # ==========================================
+      # 2. تثبيت Tailscale
+      # ==========================================
       - name: Install Tailscale
         shell: powershell
         run: |
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
-          Invoke-WebRequest $url -OutFile "$env:TEMP\tailscale.msi"
+          Write-Host "Installing Tailscale..."
 
-          Start-Process msiexec.exe `
-            -ArgumentList "/i `"$env:TEMP\tailscale.msi`" /qn /norestart" `
+          $installer = "$env:TEMP\tailscale.msi"
+
+          Invoke-WebRequest `
+            -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" `
+            -OutFile $installer
+
+          Start-Process `
+            msiexec.exe `
+            -ArgumentList "/i `"$installer`" /qn /norestart" `
             -Wait
 
+          Write-Host "Tailscale installed."
+
+      # ==========================================
+      # 3. الاتصال بشبكة Tailscale
+      # ==========================================
       - name: Connect Tailscale
         shell: powershell
         env:
           TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
         run: |
+          Write-Host "Connecting to Tailscale..."
+
           & "C:\Program Files\Tailscale\tailscale.exe" up `
             --auth-key="$env:TS_AUTH_KEY" `
             --hostname="roblox-rdp"
 
           Start-Sleep -Seconds 5
 
-          $ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+          $ip = & `
+            "C:\Program Files\Tailscale\tailscale.exe" `
+            ip -4
 
           Write-Host ""
-          Write-Host "===================================="
+          Write-Host "======================================"
+          Write-Host "        ROBLOX RDP IS READY"
+          Write-Host "======================================"
+          Write-Host ""
           Write-Host "RDP IP:"
           Write-Host $ip
           Write-Host ""
-          Write-Host "USERNAME: rdpuser"
-          Write-Host "PASSWORD: RobloxRDP2026!"
-          Write-Host "===================================="
+          Write-Host "USERNAME:"
+          Write-Host "3NB"
           Write-Host ""
+          Write-Host "PASSWORD:"
+          Write-Host "511"
+          Write-Host ""
+          Write-Host "======================================"
 
+      # ==========================================
+      # 4. تحميل أحدث Roblox Studio
+      # ==========================================
+      - name: Download Roblox Studio
+        shell: powershell
+        run: |
+          Write-Host "Downloading latest Roblox Studio..."
+
+          $installer = "$env:TEMP\RobloxStudioLauncherBeta.exe"
+
+          Invoke-WebRequest `
+            -Uri "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
+            -OutFile $installer
+
+          if (!(Test-Path $installer)) {
+              throw "Roblox Studio download failed."
+          }
+
+          $size = (Get-Item $installer).Length / 1MB
+
+          Write-Host "Downloaded Roblox Studio."
+          Write-Host "Installer size: $size MB"
+
+      # ==========================================
+      # 5. تثبيت Roblox Studio
+      # ==========================================
       - name: Install Roblox Studio
         shell: powershell
         run: |
-          Invoke-WebRequest `
-            "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
-            -OutFile "$env:TEMP\RobloxStudioLauncherBeta.exe"
+          Write-Host "Installing Roblox Studio..."
+
+          $installer = "$env:TEMP\RobloxStudioLauncherBeta.exe"
 
           Start-Process `
-            "$env:TEMP\RobloxStudioLauncherBeta.exe" `
+            -FilePath $installer `
             -ArgumentList "-install" `
             -Wait
 
-      - name: Keep Windows alive
+          Write-Host "Waiting for Studio installation..."
+
+          Start-Sleep -Seconds 15
+
+          $studio = Get-ChildItem `
+            "$env:LOCALAPPDATA\Roblox\Versions" `
+            -Filter "RobloxStudioBeta.exe" `
+            -Recurse `
+            -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if (!$studio) {
+              Write-Host ""
+              Write-Host "Studio executable was not found."
+              Write-Host ""
+              Write-Host "Roblox folder contents:"
+
+              if (Test-Path "$env:LOCALAPPDATA\Roblox") {
+                  Get-ChildItem `
+                    "$env:LOCALAPPDATA\Roblox" `
+                    -Recurse `
+                    -ErrorAction SilentlyContinue |
+                    Select-Object FullName
+              }
+
+              throw "Roblox Studio installation failed."
+          }
+
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "Roblox Studio installed successfully."
+          Write-Host "======================================"
+          Write-Host ""
+          Write-Host "Studio:"
+          Write-Host $studio.FullName
+
+      # ==========================================
+      # 6. تحسين إعدادات Windows للـRDP
+      # ==========================================
+      - name: Optimize Windows for RDP
         shell: powershell
         run: |
-          Write-Host "Windows RDP is ready."
-          Write-Host "Keep this job running while you use Roblox Studio."
+          Write-Host "Optimizing Windows..."
+
+          # Disable visual effects
+          Set-ItemProperty `
+            -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
+            -Name VisualFXSetting `
+            -Value 2 `
+            -ErrorAction SilentlyContinue
+
+          # Disable transparency
+          Set-ItemProperty `
+            -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" `
+            -Name EnableTransparency `
+            -Value 0 `
+            -ErrorAction SilentlyContinue
+
+          # Disable animations
+          Set-ItemProperty `
+            -Path "HKCU:\Control Panel\Desktop\WindowMetrics" `
+            -Name MinAnimate `
+            -Value 0 `
+            -ErrorAction SilentlyContinue
+
+          Write-Host "Windows optimization complete."
+
+      # ==========================================
+      # 7. البحث عن Studio وتجهيزه
+      # ==========================================
+      - name: Prepare Roblox Studio
+        shell: powershell
+        run: |
+          Write-Host "Finding Roblox Studio..."
+
+          $studio = Get-ChildItem `
+            "$env:LOCALAPPDATA\Roblox\Versions" `
+            -Filter "RobloxStudioBeta.exe" `
+            -Recurse `
+            -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if (!$studio) {
+              throw "Roblox Studio executable not found."
+          }
+
+          Write-Host "Studio path:"
+          Write-Host $studio.FullName
+
+          # Create desktop shortcut
+          $desktop = [Environment]::GetFolderPath("Desktop")
+
+          $shortcutPath = Join-Path `
+            $desktop `
+            "Roblox Studio.lnk"
+
+          $shell = New-Object -ComObject WScript.Shell
+
+          $shortcut = $shell.CreateShortcut($shortcutPath)
+
+          $shortcut.TargetPath = $studio.FullName
+          $shortcut.WorkingDirectory = $studio.DirectoryName
+          $shortcut.Description = "Roblox Studio"
+
+          $shortcut.Save()
+
+          Write-Host "Desktop shortcut created."
+
+      # ==========================================
+      # 8. إبقاء الـWindows شغال
+      # ==========================================
+      - name: Keep Windows RDP Alive
+        shell: powershell
+        run: |
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "      WINDOWS IS READY"
+          Write-Host "======================================"
+          Write-Host ""
+          Write-Host "Connect using Windows App."
+          Write-Host ""
+          Write-Host "Keep this job running while using RDP."
+          Write-Host ""
 
           while ($true) {
-              Start-Sleep -Seconds 9999
-              Write-Host "RDP still running: $(Get-Date)"
+              Write-Host "RDP ACTIVE - $(Get-Date)"
+              Start-Sleep -Seconds 99999
           }
