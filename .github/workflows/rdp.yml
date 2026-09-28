@@ -9,18 +9,20 @@ jobs:
     timeout-minutes: 350
 
     env:
-      RDP_USER: "3NB"
-      RDP_DATA: "C:\RDPData"
-      RCLONE_DIR: "C:\Rclone"
-      RCLONE_EXE: "C:\Rclone\rclone.exe"
-      RCLONE_CONFIG: "C:\Rclone\rclone.conf"
-      RCLONE_REMOTE: "gdrive:RDP-V6-Persistent"
-      SYNC_INTERVAL: "30"
+      RDP_USER: '3NB'
+      RDP_DATA: 'C:\RDPData'
+      RCLONE_DIR: 'C:\Rclone'
+      RCLONE_EXE: 'C:\Rclone\rclone.exe'
+      RCLONE_CONFIG: 'C:\Rclone\rclone.conf'
+      RCLONE_REMOTE: 'gdrive:RDP-V6-Persistent'
+      SYNC_INTERVAL: '30'
 
     steps:
+
       # ============================================================
-      # 1. Prepare persistent data directory
+      # 1. تجهيز مجلد الحفظ
       # ============================================================
+
       - name: Prepare persistent storage
         shell: powershell
         env:
@@ -34,89 +36,115 @@ jobs:
           $jsonPath = Join-Path $env:RCLONE_DIR "service-account.json"
 
           [System.IO.File]::WriteAllText(
-            $jsonPath,
-            $env:GOOGLE_SERVICE_ACCOUNT_JSON,
-            [System.Text.UTF8Encoding]::new($false)
+              $jsonPath,
+              $env:GOOGLE_SERVICE_ACCOUNT_JSON,
+              [System.Text.UTF8Encoding]::new($false)
           )
 
+          Write-Host "Persistent storage prepared."
+
       # ============================================================
-      # 2. Install ONLY rclone for persistent saving
+      # 2. تنزيل rclone فقط
       # ============================================================
+
       - name: Install rclone
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          $zip = "$env:TEMP\rclone.zip"
-          $extract = "$env:TEMP\rclone_extract"
+          $zipPath = Join-Path $env:TEMP "rclone.zip"
+          $extractPath = Join-Path $env:TEMP "rclone_extract"
 
-          Remove-Item $zip -Force -ErrorAction SilentlyContinue
-          Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+          Remove-Item $extractPath -Recurse -Force -ErrorAction SilentlyContinue
 
           Invoke-WebRequest `
-            -Uri "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
-            -OutFile $zip
+              -Uri "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
+              -OutFile $zipPath
 
-          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          Expand-Archive `
+              -Path $zipPath `
+              -DestinationPath $extractPath `
+              -Force
 
-          $exe = Get-ChildItem `
-            -Path $extract `
-            -Filter "rclone.exe" `
-            -Recurse |
-            Select-Object -First 1
+          $rcloneSource = Get-ChildItem `
+              -Path $extractPath `
+              -Filter "rclone.exe" `
+              -Recurse |
+              Select-Object -First 1
 
-          if (-not $exe) {
-            throw "rclone.exe was not found."
+          if (-not $rcloneSource) {
+              throw "rclone.exe was not found."
           }
 
-          Copy-Item $exe.FullName $env:RCLONE_EXE -Force
+          Copy-Item `
+              -Path $rcloneSource.FullName `
+              -Destination $env:RCLONE_EXE `
+              -Force
 
           & $env:RCLONE_EXE version
 
+          Write-Host "rclone installed successfully."
+
       # ============================================================
-      # 3. Configure Google Drive
+      # 3. إعداد Google Drive
       # ============================================================
+
       - name: Configure Google Drive
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          @"
+          $config = @"
           [gdrive]
           type = drive
           scope = drive
           service_account_file = C:\Rclone\service-account.json
-          "@ | Set-Content `
-            -Path $env:RCLONE_CONFIG `
-            -Encoding UTF8
+          "@
+
+          Set-Content `
+              -Path $env:RCLONE_CONFIG `
+              -Value $config `
+              -Encoding UTF8
 
           & $env:RCLONE_EXE `
-            --config $env:RCLONE_CONFIG `
-            lsd gdrive:
+              --config $env:RCLONE_CONFIG `
+              lsd gdrive:
+
+          Write-Host "Google Drive connection OK."
 
       # ============================================================
-      # 4. Restore previous saved data BEFORE starting RDP
+      # 4. استرجاع الملفات المحفوظة
       # ============================================================
+
       - name: Restore saved files
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          New-Item -ItemType Directory -Force -Path $env:RDP_DATA | Out-Null
+          New-Item `
+              -ItemType Directory `
+              -Force `
+              -Path $env:RDP_DATA | Out-Null
+
+          Write-Host "Restoring saved files..."
 
           & $env:RCLONE_EXE `
-            --config $env:RCLONE_CONFIG `
-            sync `
-            $env:RCLONE_REMOTE `
-            $env:RDP_DATA `
-            --create-empty-src-dirs `
-            --fast-list `
-            --transfers 8 `
-            --checkers 16
+              --config $env:RCLONE_CONFIG `
+              sync `
+              $env:RCLONE_REMOTE `
+              $env:RDP_DATA `
+              --create-empty-src-dirs `
+              --fast-list `
+              --transfers 8 `
+              --checkers 16
+
+          Write-Host "Restore completed."
 
       # ============================================================
-      # 5. Create RDP user
+      # 5. إنشاء مستخدم RDP
       # ============================================================
+
       - name: Configure RDP user
         shell: powershell
         env:
@@ -124,274 +152,345 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          if ([string]::IsNullOrWhiteSpace($env:RDP_PASSWORD)) {
+              throw "RDP_PASSWORD secret is empty."
+          }
+
           $securePassword = ConvertTo-SecureString `
-            $env:RDP_PASSWORD `
-            -AsPlainText `
-            -Force
+              $env:RDP_PASSWORD `
+              -AsPlainText `
+              -Force
 
-          $user = Get-LocalUser `
-            -Name $env:RDP_USER `
-            -ErrorAction SilentlyContinue
-
-          if ($user) {
-            Set-LocalUser `
+          $existingUser = Get-LocalUser `
               -Name $env:RDP_USER `
-              -Password $securePassword
+              -ErrorAction SilentlyContinue
+
+          if ($existingUser) {
+
+              Set-LocalUser `
+                  -Name $env:RDP_USER `
+                  -Password $securePassword
+
           }
           else {
-            New-LocalUser `
-              -Name $env:RDP_USER `
-              -Password $securePassword `
-              -PasswordNeverExpires `
-              -UserMayNotChangePassword
+
+              New-LocalUser `
+                  -Name $env:RDP_USER `
+                  -Password $securePassword `
+                  -PasswordNeverExpires `
+                  -UserMayNotChangePassword
           }
 
           Add-LocalGroupMember `
-            -Group "Administrators" `
-            -Member $env:RDP_USER `
-            -ErrorAction SilentlyContinue
+              -Group "Administrators" `
+              -Member $env:RDP_USER `
+              -ErrorAction SilentlyContinue
 
           Add-LocalGroupMember `
-            -Group "Remote Desktop Users" `
-            -Member $env:RDP_USER `
-            -ErrorAction SilentlyContinue
+              -Group "Remote Desktop Users" `
+              -Member $env:RDP_USER `
+              -ErrorAction SilentlyContinue
+
+          Write-Host "RDP user configured."
 
       # ============================================================
-      # 6. Enable RDP
+      # 6. تشغيل Remote Desktop
       # ============================================================
+
       - name: Enable Remote Desktop
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
           Set-ItemProperty `
-            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
-            -Name "fDenyTSConnections" `
-            -Value 0
+              -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+              -Name "fDenyTSConnections" `
+              -Value 0
 
           Set-ItemProperty `
-            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
-            -Name "UserAuthentication" `
-            -Value 1
+              -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+              -Name "UserAuthentication" `
+              -Value 1
 
           Enable-NetFirewallRule `
-            -DisplayGroup "Remote Desktop"
+              -DisplayGroup "Remote Desktop"
 
-          Restart-Service TermService -Force
+          Restart-Service `
+              -Name TermService `
+              -Force
+
+          Write-Host "Remote Desktop enabled."
 
       # ============================================================
-      # 7. Put user folders inside persistent storage
+      # 7. جعل مجلدات المستخدم محفوظة داخل RDPData
       # ============================================================
+
       - name: Create persistent user folders
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
           $folders = @(
-            "Desktop",
-            "Downloads",
-            "Documents",
-            "Pictures",
-            "Videos",
-            "Music"
+              "Desktop",
+              "Downloads",
+              "Documents",
+              "Pictures",
+              "Videos",
+              "Music"
           )
 
+          $profilePath = "C:\Users\$env:RDP_USER"
+
+          New-Item `
+              -ItemType Directory `
+              -Force `
+              -Path $profilePath | Out-Null
+
           foreach ($folder in $folders) {
-            $persistent = Join-Path $env:RDP_DATA $folder
-            New-Item -ItemType Directory -Force -Path $persistent | Out-Null
-          }
 
-          $profile = "C:\Users\$env:RDP_USER"
+              $persistentPath = Join-Path $env:RDP_DATA $folder
+              $userPath = Join-Path $profilePath $folder
 
-          foreach ($folder in $folders) {
-            $normal = Join-Path $profile $folder
-            $persistent = Join-Path $env:RDP_DATA $folder
-
-            if (Test-Path $normal) {
-              $item = Get-Item $normal -Force
-
-              if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-                Get-ChildItem $normal -Force -ErrorAction SilentlyContinue |
-                  Copy-Item -Destination $persistent -Recurse -Force -ErrorAction SilentlyContinue
-
-                Remove-Item $normal -Recurse -Force
-              }
-            }
-
-            if (-not (Test-Path $normal)) {
               New-Item `
-                -ItemType Junction `
-                -Path $normal `
-                -Target $persistent | Out-Null
-            }
+                  -ItemType Directory `
+                  -Force `
+                  -Path $persistentPath | Out-Null
+
+              if (Test-Path $userPath) {
+
+                  $item = Get-Item `
+                      -Path $userPath `
+                      -Force `
+                      -ErrorAction SilentlyContinue
+
+                  if ($item -and
+                      -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+
+                      Get-ChildItem `
+                          -Path $userPath `
+                          -Force `
+                          -ErrorAction SilentlyContinue |
+                          Copy-Item `
+                              -Destination $persistentPath `
+                              -Recurse `
+                              -Force `
+                              -ErrorAction SilentlyContinue
+
+                      Remove-Item `
+                          -Path $userPath `
+                          -Recurse `
+                          -Force `
+                          -ErrorAction SilentlyContinue
+                  }
+              }
+
+              if (-not (Test-Path $userPath)) {
+
+                  New-Item `
+                      -ItemType Junction `
+                      -Path $userPath `
+                      -Target $persistentPath | Out-Null
+              }
           }
 
+          Write-Host "Persistent user folders created."
+
       # ============================================================
-      # 8. Performance optimizations
-      #    No additional applications are installed.
+      # 8. تحسين أداء Windows بدون تنزيل برامج
       # ============================================================
+
       - name: Optimize Windows performance
         shell: powershell
         run: |
           $ErrorActionPreference = "SilentlyContinue"
 
-          # Prefer high performance power plan when available
+          # High Performance power plan
           powercfg /setactive SCHEME_MIN
 
-          # Disable power saving on network adapters where supported
-          Get-NetAdapter -Physical | ForEach-Object {
-            try {
-              Set-NetAdapterPowerManagement `
-                -Name $_.Name `
-                -AllowComputerToTurnOffDevice Disabled `
-                -ErrorAction SilentlyContinue
-            } catch {}
-          }
-
-          # Reduce visual effects
-          $visualKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"
+          # تقليل المؤثرات البصرية
+          $visualEffects = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"
 
           New-Item `
-            -Path $visualKey `
-            -Force | Out-Null
+              -Path $visualEffects `
+              -Force | Out-Null
 
           Set-ItemProperty `
-            -Path $visualKey `
-            -Name "VisualFXSetting" `
-            -Type DWord `
-            -Value 2
+              -Path $visualEffects `
+              -Name "VisualFXSetting" `
+              -Type DWord `
+              -Value 2
 
-          # Disable transparency
+          # إيقاف الشفافية
           $personalize = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
 
           New-Item `
-            -Path $personalize `
-            -Force | Out-Null
+              -Path $personalize `
+              -Force | Out-Null
 
           Set-ItemProperty `
-            -Path $personalize `
-            -Name "EnableTransparency" `
-            -Type DWord `
-            -Value 0
+              -Path $personalize `
+              -Name "EnableTransparency" `
+              -Type DWord `
+              -Value 0
 
-          # Reduce Windows animations
+          # تقليل بعض المؤثرات
           $desktop = "HKCU:\Control Panel\Desktop"
 
           Set-ItemProperty `
-            -Path $desktop `
-            -Name "UserPreferencesMask" `
-            -Type Binary `
-            -Value ([byte[]](0x90,0x12,0x03,0x80,0x10,0x00,0x00,0x00))
+              -Path $desktop `
+              -Name "MenuShowDelay" `
+              -Value "0"
+
+          Write-Host "Performance optimizations applied."
 
       # ============================================================
-      # 9. Start CONTINUOUS BACKGROUND SAVE
-      #    This starts BEFORE the workflow is kept alive.
+      # 9. بدء الحفظ المستمر كل 30 ثانية
       # ============================================================
-      - name: Start continuous Google Drive sync
+
+      - name: Start continuous backup
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          $script = @'
+          $syncScript = "C:\Rclone\continuous-sync.ps1"
+
+          $scriptContent = @'
           $ErrorActionPreference = "SilentlyContinue"
 
           $rclone = "C:\Rclone\rclone.exe"
           $config = "C:\Rclone\rclone.conf"
           $source = "C:\RDPData"
           $remote = "gdrive:RDP-V6-Persistent"
+          $interval = 30
 
           while ($true) {
-              try {
-                  & $rclone `
-                    --config $config `
-                    sync `
-                    $source `
-                    $remote `
-                    --create-empty-src-dirs `
-                    --fast-list `
-                    --transfers 8 `
-                    --checkers 16 `
-                    --log-level NOTICE `
-                    --log-file "C:\Rclone\sync.log"
-              }
-              catch {}
 
-              Start-Sleep -Seconds 30
+              try {
+
+                  & $rclone `
+                      --config $config `
+                      sync `
+                      $source `
+                      $remote `
+                      --create-empty-src-dirs `
+                      --fast-list `
+                      --transfers 8 `
+                      --checkers 16 `
+                      --log-level NOTICE `
+                      --log-file "C:\Rclone\sync.log"
+
+              }
+              catch {
+              }
+
+              Start-Sleep -Seconds $interval
           }
           '@
 
-          $syncScript = "C:\Rclone\continuous-sync.ps1"
-
           Set-Content `
-            -Path $syncScript `
-            -Value $script `
-            -Encoding UTF8
+              -Path $syncScript `
+              -Value $scriptContent `
+              -Encoding UTF8
 
           Start-Process `
-            powershell.exe `
-            -ArgumentList @(
-              "-NoProfile",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-WindowStyle",
-              "Hidden",
-              "-File",
-              $syncScript
-            ) `
-            -WindowStyle Hidden
+              -FilePath "powershell.exe" `
+              -ArgumentList @(
+                  "-NoProfile",
+                  "-ExecutionPolicy",
+                  "Bypass",
+                  "-WindowStyle",
+                  "Hidden",
+                  "-File",
+                  $syncScript
+              ) `
+              -WindowStyle Hidden
 
           Start-Sleep -Seconds 5
 
-          Write-Host "Continuous Google Drive sync started."
+          Write-Host "=========================================="
+          Write-Host " CONTINUOUS SAVE STARTED"
+          Write-Host " Interval: 30 seconds"
+          Write-Host " Source: C:\RDPData"
+          Write-Host " Remote: gdrive:RDP-V6-Persistent"
+          Write-Host "=========================================="
 
       # ============================================================
-      # 10. Show system information
+      # 10. معلومات الجهاز والشبكة
       # ============================================================
-      - name: Show system performance
+
+      - name: Show system information
         shell: powershell
         run: |
           Write-Host ""
-          Write-Host "========== SYSTEM =========="
+          Write-Host "=========================================="
+          Write-Host " SYSTEM INFORMATION"
+          Write-Host "=========================================="
 
           Get-CimInstance Win32_Processor |
-            Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed |
-            Format-List
+              Select-Object `
+                  Name,
+                  NumberOfCores,
+                  NumberOfLogicalProcessors,
+                  MaxClockSpeed |
+              Format-List
 
           Get-CimInstance Win32_ComputerSystem |
-            Select-Object TotalPhysicalMemory |
-            Format-List
+              Select-Object `
+                  @{Name="RAM_GB";Expression={
+                      [math]::Round($_.TotalPhysicalMemory / 1GB, 2)
+                  }} |
+              Format-List
 
           Write-Host ""
-          Write-Host "========== NETWORK =========="
+          Write-Host "=========================================="
+          Write-Host " NETWORK"
+          Write-Host "=========================================="
 
           Get-NetAdapter -Physical |
-            Where-Object Status -eq "Up" |
-            Select-Object Name, LinkSpeed, Status |
-            Format-Table -AutoSize
+              Where-Object Status -eq "Up" |
+              Select-Object `
+                  Name,
+                  Status,
+                  LinkSpeed |
+              Format-Table -AutoSize
 
           Write-Host ""
-          Write-Host "========== STORAGE =========="
+          Write-Host "=========================================="
+          Write-Host " DISK"
+          Write-Host "=========================================="
 
           Get-PSDrive -PSProvider FileSystem |
-            Select-Object Name,
-              @{N="FreeGB";E={[math]::Round($_.Free/1GB,2)}},
-              @{N="UsedGB";E={[math]::Round(($_.Used)/1GB,2)}} |
-            Format-Table -AutoSize
+              Select-Object `
+                  Name,
+                  @{Name="FreeGB";Expression={
+                      [math]::Round($_.Free / 1GB, 2)
+                  }},
+                  @{Name="UsedGB";Expression={
+                      [math]::Round($_.Used / 1GB, 2)
+                  }} |
+              Format-Table -AutoSize
 
       # ============================================================
-      # 11. Keep runner alive
+      # 11. إبقاء الـRunner شغال
       # ============================================================
+
       - name: Keep RDP alive
         shell: powershell
         run: |
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host " RDP RUNNER IS READY"
-          Write-Host " Persistent folder: C:\RDPData"
-          Write-Host " Google Drive sync: EVERY 30 SECONDS"
+          Write-Host " WINDOWS RDP IS READY"
           Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "Persistent data : C:\RDPData"
+          Write-Host "Backup interval  : 30 seconds"
+          Write-Host "Google Drive     : RDP-V6-Persistent"
+          Write-Host ""
+          Write-Host "Runner will stay alive."
           Write-Host ""
 
           while ($true) {
-            Start-Sleep -Seconds 999999999999999
+
+              Start-Sleep -Seconds 999999999999
+
           }
