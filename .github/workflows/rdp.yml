@@ -30,10 +30,23 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          New-Item -ItemType Directory -Force -Path $env:RDP_DATA | Out-Null
-          New-Item -ItemType Directory -Force -Path $env:RCLONE_DIR | Out-Null
+          New-Item `
+              -ItemType Directory `
+              -Force `
+              -Path $env:RDP_DATA | Out-Null
 
-          $jsonPath = Join-Path $env:RCLONE_DIR "service-account.json"
+          New-Item `
+              -ItemType Directory `
+              -Force `
+              -Path $env:RCLONE_DIR | Out-Null
+
+          if ([string]::IsNullOrWhiteSpace($env:GOOGLE_SERVICE_ACCOUNT_JSON)) {
+              throw "GOOGLE_SERVICE_ACCOUNT_JSON secret is empty."
+          }
+
+          $jsonPath = Join-Path `
+              $env:RCLONE_DIR `
+              "service-account.json"
 
           [System.IO.File]::WriteAllText(
               $jsonPath,
@@ -52,11 +65,26 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $zipPath = Join-Path $env:TEMP "rclone.zip"
-          $extractPath = Join-Path $env:TEMP "rclone_extract"
+          $zipPath = Join-Path `
+              $env:TEMP `
+              "rclone.zip"
 
-          Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-          Remove-Item $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+          $extractPath = Join-Path `
+              $env:TEMP `
+              "rclone_extract"
+
+          Remove-Item `
+              $zipPath `
+              -Force `
+              -ErrorAction SilentlyContinue
+
+          Remove-Item `
+              $extractPath `
+              -Recurse `
+              -Force `
+              -ErrorAction SilentlyContinue
+
+          Write-Host "Downloading rclone..."
 
           Invoke-WebRequest `
               -Uri "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
@@ -84,6 +112,10 @@ jobs:
 
           & $env:RCLONE_EXE version
 
+          if ($LASTEXITCODE -ne 0) {
+              throw "rclone installation failed."
+          }
+
           Write-Host "rclone installed successfully."
 
       # ============================================================
@@ -107,14 +139,54 @@ jobs:
               -Value $config `
               -Encoding UTF8
 
+          Write-Host "Testing Google Drive connection..."
+
           & $env:RCLONE_EXE `
               --config $env:RCLONE_CONFIG `
               lsd gdrive:
 
+          if ($LASTEXITCODE -ne 0) {
+              throw "Google Drive connection failed."
+          }
+
           Write-Host "Google Drive connection OK."
 
       # ============================================================
-      # 4. استرجاع الملفات المحفوظة
+      # 4. إنشاء مجلد الحفظ إذا لم يكن موجودًا
+      # ============================================================
+
+      - name: Create persistent Google Drive folder
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "Checking Google Drive folder..."
+
+          & $env:RCLONE_EXE `
+              --config $env:RCLONE_CONFIG `
+              mkdir `
+              $env:RCLONE_REMOTE
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Could not create/access Google Drive folder: RDP-V6-Persistent"
+          }
+
+          Write-Host "Google Drive folder is ready."
+
+          Write-Host "Verifying folder..."
+
+          & $env:RCLONE_EXE `
+              --config $env:RCLONE_CONFIG `
+              lsf `
+              $env:RCLONE_REMOTE `
+              --max-depth 1
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Google Drive folder verification failed."
+          }
+
+      # ============================================================
+      # 5. استرجاع الملفات القديمة
       # ============================================================
 
       - name: Restore saved files
@@ -127,7 +199,10 @@ jobs:
               -Force `
               -Path $env:RDP_DATA | Out-Null
 
-          Write-Host "Restoring saved files..."
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host " RESTORING SAVED FILES"
+          Write-Host "=========================================="
 
           & $env:RCLONE_EXE `
               --config $env:RCLONE_CONFIG `
@@ -139,10 +214,15 @@ jobs:
               --transfers 8 `
               --checkers 16
 
-          Write-Host "Restore completed."
+          if ($LASTEXITCODE -ne 0) {
+              throw "Restore failed. rclone exit code: $LASTEXITCODE"
+          }
+
+          Write-Host ""
+          Write-Host "Restore completed successfully."
 
       # ============================================================
-      # 5. إنشاء مستخدم RDP
+      # 6. إنشاء مستخدم RDP
       # ============================================================
 
       - name: Configure RDP user
@@ -194,7 +274,7 @@ jobs:
           Write-Host "RDP user configured."
 
       # ============================================================
-      # 6. تشغيل Remote Desktop
+      # 7. تشغيل Remote Desktop
       # ============================================================
 
       - name: Enable Remote Desktop
@@ -222,7 +302,7 @@ jobs:
           Write-Host "Remote Desktop enabled."
 
       # ============================================================
-      # 7. جعل مجلدات المستخدم محفوظة داخل RDPData
+      # 8. مجلدات المستخدم المحفوظة
       # ============================================================
 
       - name: Create persistent user folders
@@ -248,8 +328,13 @@ jobs:
 
           foreach ($folder in $folders) {
 
-              $persistentPath = Join-Path $env:RDP_DATA $folder
-              $userPath = Join-Path $profilePath $folder
+              $persistentPath = Join-Path `
+                  $env:RDP_DATA `
+                  $folder
+
+              $userPath = Join-Path `
+                  $profilePath `
+                  $folder
 
               New-Item `
                   -ItemType Directory `
@@ -296,7 +381,7 @@ jobs:
           Write-Host "Persistent user folders created."
 
       # ============================================================
-      # 8. تحسين أداء Windows بدون تنزيل برامج
+      # 9. تحسين الأداء بدون تنزيل تطبيقات
       # ============================================================
 
       - name: Optimize Windows performance
@@ -308,7 +393,8 @@ jobs:
           powercfg /setactive SCHEME_MIN
 
           # تقليل المؤثرات البصرية
-          $visualEffects = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"
+          $visualEffects = `
+              "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"
 
           New-Item `
               -Path $visualEffects `
@@ -321,7 +407,8 @@ jobs:
               -Value 2
 
           # إيقاف الشفافية
-          $personalize = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+          $personalize = `
+              "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
 
           New-Item `
               -Path $personalize `
@@ -333,7 +420,7 @@ jobs:
               -Type DWord `
               -Value 0
 
-          # تقليل بعض المؤثرات
+          # تقليل تأخير القوائم
           $desktop = "HKCU:\Control Panel\Desktop"
 
           Set-ItemProperty `
@@ -344,7 +431,7 @@ jobs:
           Write-Host "Performance optimizations applied."
 
       # ============================================================
-      # 9. بدء الحفظ المستمر كل 30 ثانية
+      # 10. بدء الحفظ المستمر
       # ============================================================
 
       - name: Start continuous backup
@@ -407,15 +494,17 @@ jobs:
 
           Start-Sleep -Seconds 5
 
+          Write-Host ""
           Write-Host "=========================================="
           Write-Host " CONTINUOUS SAVE STARTED"
-          Write-Host " Interval: 30 seconds"
-          Write-Host " Source: C:\RDPData"
-          Write-Host " Remote: gdrive:RDP-V6-Persistent"
+          Write-Host "=========================================="
+          Write-Host "Interval: 30 seconds"
+          Write-Host "Source: C:\RDPData"
+          Write-Host "Remote: gdrive:RDP-V6-Persistent"
           Write-Host "=========================================="
 
       # ============================================================
-      # 10. معلومات الجهاز والشبكة
+      # 11. معلومات الجهاز
       # ============================================================
 
       - name: Show system information
@@ -437,7 +526,10 @@ jobs:
           Get-CimInstance Win32_ComputerSystem |
               Select-Object `
                   @{Name="RAM_GB";Expression={
-                      [math]::Round($_.TotalPhysicalMemory / 1GB, 2)
+                      [math]::Round(
+                          $_.TotalPhysicalMemory / 1GB,
+                          2
+                      )
                   }} |
               Format-List
 
@@ -463,15 +555,21 @@ jobs:
               Select-Object `
                   Name,
                   @{Name="FreeGB";Expression={
-                      [math]::Round($_.Free / 1GB, 2)
+                      [math]::Round(
+                          $_.Free / 1GB,
+                          2
+                      )
                   }},
                   @{Name="UsedGB";Expression={
-                      [math]::Round($_.Used / 1GB, 2)
+                      [math]::Round(
+                          $_.Used / 1GB,
+                          2
+                      )
                   }} |
               Format-Table -AutoSize
 
       # ============================================================
-      # 11. إبقاء الـRunner شغال
+      # 12. إبقاء الـRunner شغال
       # ============================================================
 
       - name: Keep RDP alive
@@ -490,7 +588,5 @@ jobs:
           Write-Host ""
 
           while ($true) {
-
-              Start-Sleep -Seconds 999999999999
-
+              Start-Sleep -Seconds 30000000000
           }
