@@ -20,7 +20,7 @@ jobs:
     steps:
 
       # ============================================================
-      # 1. تجهيز مجلد الحفظ
+      # 1. تجهيز التخزين
       # ============================================================
 
       - name: Prepare persistent storage
@@ -57,7 +57,7 @@ jobs:
           Write-Host "Persistent storage prepared."
 
       # ============================================================
-      # 2. تنزيل rclone فقط
+      # 2. تنزيل rclone فقط للحفظ
       # ============================================================
 
       - name: Install rclone
@@ -65,24 +65,11 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $zipPath = Join-Path `
-              $env:TEMP `
-              "rclone.zip"
+          $zipPath = Join-Path $env:TEMP "rclone.zip"
+          $extractPath = Join-Path $env:TEMP "rclone_extract"
 
-          $extractPath = Join-Path `
-              $env:TEMP `
-              "rclone_extract"
-
-          Remove-Item `
-              $zipPath `
-              -Force `
-              -ErrorAction SilentlyContinue
-
-          Remove-Item `
-              $extractPath `
-              -Recurse `
-              -Force `
-              -ErrorAction SilentlyContinue
+          Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+          Remove-Item $extractPath -Recurse -Force -ErrorAction SilentlyContinue
 
           Write-Host "Downloading rclone..."
 
@@ -152,7 +139,7 @@ jobs:
           Write-Host "Google Drive connection OK."
 
       # ============================================================
-      # 4. إنشاء مجلد الحفظ إذا لم يكن موجودًا
+      # 4. إنشاء مجلد الحفظ
       # ============================================================
 
       - name: Create persistent Google Drive folder
@@ -168,12 +155,10 @@ jobs:
               $env:RCLONE_REMOTE
 
           if ($LASTEXITCODE -ne 0) {
-              throw "Could not create/access Google Drive folder: RDP-V6-Persistent"
+              throw "Could not create/access RDP-V6-Persistent."
           }
 
           Write-Host "Google Drive folder is ready."
-
-          Write-Host "Verifying folder..."
 
           & $env:RCLONE_EXE `
               --config $env:RCLONE_CONFIG `
@@ -186,7 +171,7 @@ jobs:
           }
 
       # ============================================================
-      # 5. استرجاع الملفات القديمة
+      # 5. استرجاع الملفات المحفوظة
       # ============================================================
 
       - name: Restore saved files
@@ -218,7 +203,6 @@ jobs:
               throw "Restore failed. rclone exit code: $LASTEXITCODE"
           }
 
-          Write-Host ""
           Write-Host "Restore completed successfully."
 
       # ============================================================
@@ -251,8 +235,7 @@ jobs:
                   -Name $env:RDP_USER `
                   -Password $securePassword
 
-          }
-          else {
+          } else {
 
               New-LocalUser `
                   -Name $env:RDP_USER `
@@ -274,7 +257,7 @@ jobs:
           Write-Host "RDP user configured."
 
       # ============================================================
-      # 7. تشغيل Remote Desktop
+      # 7. تشغيل RDP
       # ============================================================
 
       - name: Enable Remote Desktop
@@ -302,7 +285,66 @@ jobs:
           Write-Host "Remote Desktop enabled."
 
       # ============================================================
-      # 8. مجلدات المستخدم المحفوظة
+      # 8. Tailscale
+      # ============================================================
+
+      - name: Install and connect Tailscale
+        shell: powershell
+        env:
+          TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if ([string]::IsNullOrWhiteSpace($env:TS_AUTH_KEY)) {
+              throw "TS_AUTH_KEY secret is empty."
+          }
+
+          $installer = Join-Path `
+              $env:TEMP `
+              "tailscale-setup.exe"
+
+          Write-Host "Downloading Tailscale..."
+
+          Invoke-WebRequest `
+              -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" `
+              -OutFile $installer
+
+          Write-Host "Installing Tailscale..."
+
+          Start-Process `
+              -FilePath $installer `
+              -ArgumentList "/S" `
+              -Wait
+
+          $tailscale = Join-Path `
+              $env:ProgramFiles `
+              "Tailscale\tailscale.exe"
+
+          if (-not (Test-Path $tailscale)) {
+              throw "Tailscale was not installed."
+          }
+
+          Write-Host "Connecting Tailscale..."
+
+          & $tailscale up `
+              --auth-key="$env:TS_AUTH_KEY" `
+              --hostname="github-rdp-v6"
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Tailscale connection failed."
+          }
+
+          Start-Sleep -Seconds 5
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host " TAILSCALE CONNECTED"
+          Write-Host "=========================================="
+
+          & $tailscale ip -4
+
+      # ============================================================
+      # 9. مجلدات المستخدم المحفوظة
       # ============================================================
 
       - name: Create persistent user folders
@@ -381,7 +423,7 @@ jobs:
           Write-Host "Persistent user folders created."
 
       # ============================================================
-      # 9. تحسين الأداء بدون تنزيل تطبيقات
+      # 10. تحسين الأداء
       # ============================================================
 
       - name: Optimize Windows performance
@@ -389,7 +431,7 @@ jobs:
         run: |
           $ErrorActionPreference = "SilentlyContinue"
 
-          # High Performance power plan
+          # High Performance
           powercfg /setactive SCHEME_MIN
 
           # تقليل المؤثرات البصرية
@@ -431,7 +473,7 @@ jobs:
           Write-Host "Performance optimizations applied."
 
       # ============================================================
-      # 10. بدء الحفظ المستمر
+      # 11. بدء الحفظ المستمر
       # ============================================================
 
       - name: Start continuous backup
@@ -452,23 +494,17 @@ jobs:
 
           while ($true) {
 
-              try {
-
-                  & $rclone `
-                      --config $config `
-                      sync `
-                      $source `
-                      $remote `
-                      --create-empty-src-dirs `
-                      --fast-list `
-                      --transfers 8 `
-                      --checkers 16 `
-                      --log-level NOTICE `
-                      --log-file "C:\Rclone\sync.log"
-
-              }
-              catch {
-              }
+              & $rclone `
+                  --config $config `
+                  sync `
+                  $source `
+                  $remote `
+                  --create-empty-src-dirs `
+                  --fast-list `
+                  --transfers 8 `
+                  --checkers 16 `
+                  --log-level NOTICE `
+                  --log-file "C:\Rclone\sync.log"
 
               Start-Sleep -Seconds $interval
           }
@@ -504,7 +540,7 @@ jobs:
           Write-Host "=========================================="
 
       # ============================================================
-      # 11. معلومات الجهاز
+      # 12. معلومات الجهاز والشبكة
       # ============================================================
 
       - name: Show system information
@@ -569,7 +605,7 @@ jobs:
               Format-Table -AutoSize
 
       # ============================================================
-      # 12. إبقاء الـRunner شغال
+      # 13. إبقاء الـRunner شغال
       # ============================================================
 
       - name: Keep RDP alive
@@ -580,13 +616,15 @@ jobs:
           Write-Host " WINDOWS RDP IS READY"
           Write-Host "=========================================="
           Write-Host ""
+          Write-Host "RDP User        : $env:RDP_USER"
           Write-Host "Persistent data : C:\RDPData"
-          Write-Host "Backup interval  : 30 seconds"
-          Write-Host "Google Drive     : RDP-V6-Persistent"
+          Write-Host "Backup interval : 30 seconds"
+          Write-Host "Google Drive    : RDP-V6-Persistent"
+          Write-Host "Tailscale       : Connected"
           Write-Host ""
           Write-Host "Runner will stay alive."
           Write-Host ""
 
           while ($true) {
-              Start-Sleep -Seconds 30000000000
+              Start-Sleep -Seconds 400
           }
