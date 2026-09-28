@@ -1,36 +1,156 @@
 name: Windows RDP V6
-
 on:
   workflow_dispatch:
-
+permissions:
+  actions: read
+  contents: read
 jobs:
   rdp:
     runs-on: windows-2025
     timeout-minutes: 350
-
+    env:
+      RDP_DATA: C:\RDPData
+      PERSISTENT_ARTIFACT: rdp-persistent-data
     steps:
-
       # =========================================================
-      # 1. إنشاء حساب RDP + تفعيل Remote Desktop
+      # 0. البحث عن آخر Artifact واسترجاعه
+      # =========================================================
+      - name: Find Previous Persistent Data
+        id: find_artifact
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item `
+            -ItemType Directory `
+            -Path $env:RDP_DATA `
+            -Force | Out-Null
+          Write-Host "Searching for previous persistent artifact..."
+          $Headers = @{
+              Authorization = "Bearer $env:GITHUB_TOKEN"
+              Accept = "application/vnd.github+json"
+              "X-GitHub-Api-Version" = "2026-03-10"
+          }
+          $ApiUrl = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts?name=$env:PERSISTENT_ARTIFACT&per_page=100"
+          try {
+              $Result = Invoke-RestMethod `
+                -Uri $ApiUrl `
+                -Headers $Headers `
+                -Method Get
+          }
+          catch {
+              Write-Host "Could not query GitHub Artifacts."
+              Write-Host $_
+              "found=false" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+          $Artifact = $Result.artifacts |
+              Where-Object {
+                  $_.expired -eq $false
+              } |
+              Sort-Object created_at -Descending |
+              Select-Object -First 1
+          if (!$Artifact) {
+              Write-Host "No previous artifact found."
+              Write-Host "This is probably the first run."
+              "found=false" >> $env:GITHUB_OUTPUT
+              exit 0
+          }
+          Write-Host "=========================================="
+          Write-Host "PREVIOUS ARTIFACT FOUND"
+          Write-Host "=========================================="
+          Write-Host "Name: $($Artifact.name)"
+          Write-Host "ID: $($Artifact.id)"
+          Write-Host "Size: $($Artifact.size_in_bytes) bytes"
+          Write-Host "Created: $($Artifact.created_at)"
+          Write-Host "Run ID: $($Artifact.workflow_run.id)"
+          Write-Host "=========================================="
+          "found=true" >> $env:GITHUB_OUTPUT
+          "run_id=$($Artifact.workflow_run.id)" >> $env:GITHUB_OUTPUT
+      # =========================================================
+      # 1. تنزيل آخر نسخة
+      # =========================================================
+      - name: Restore Previous Persistent Data
+        if: steps.find_artifact.outputs.found == 'true'
+        uses: actions/download-artifact@v5
+        with:
+          name: rdp-persistent-data
+          path: C:\RDPData
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.find_artifact.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      # =========================================================
+      # 2. تجهيز مجلدات البيانات
+      # =========================================================
+      - name: Prepare Persistent Folders
+        shell: powershell
+        run: |
+          $Base = "C:\RDPData"
+          $Folders = @(
+              "$Base\Desktop",
+              "$Base\Downloads",
+              "$Base\Documents",
+              "$Base\Pictures",
+              "$Base\Videos",
+              "$Base\Music",
+              "$Base\Roblox",
+              "$Base\Programs",
+              "$Base\AppData"
+          )
+          foreach ($Folder in $Folders) {
+              New-Item `
+                -ItemType Directory `
+                -Path $Folder `
+                -Force | Out-Null
+          }
+          Write-Host "Persistent folders ready."
+      # =========================================================
+      # 3. عرض الملفات المسترجعة
+      # =========================================================
+      - name: Show Restored Files
+        shell: powershell
+        run: |
+          Write-Host "=========================================="
+          Write-Host "RESTORED DATA"
+          Write-Host "=========================================="
+          $Files = Get-ChildItem `
+            -Path "C:\RDPData" `
+            -Recurse `
+            -File `
+            -ErrorAction SilentlyContinue
+          Write-Host "Files restored: $($Files.Count)"
+          if ($Files.Count -gt 0) {
+              Write-Host ""
+              Write-Host "First restored files:"
+              $Files |
+                Select-Object -First 50 |
+                ForEach-Object {
+                    Write-Host $_.FullName
+                }
+          }
+          Write-Host "=========================================="
+      # =========================================================
+      # 4. إنشاء حساب RDP
       # =========================================================
       - name: Setup Windows RDP
         shell: powershell
         run: |
           $UserName = "3NB"
           $PasswordPlain = "aboatb2026!"
-
           Write-Host "Creating RDP user..."
-
           $SecurePassword = ConvertTo-SecureString `
             $PasswordPlain `
             -AsPlainText `
             -Force
-
-          $ExistingUser = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
-
+          $ExistingUser = Get-LocalUser `
+            -Name $UserName `
+            -ErrorAction SilentlyContinue
           if ($ExistingUser) {
               Write-Host "User already exists."
-              Set-LocalUser -Name $UserName -Password $SecurePassword
+              Set-LocalUser `
+                -Name $UserName `
+                -Password $SecurePassword
           }
           else {
               New-LocalUser `
@@ -41,181 +161,192 @@ jobs:
                 -PasswordNeverExpires:$true `
                 -AccountNeverExpires:$true
           }
-
           Add-LocalGroupMember `
             -Group "Administrators" `
             -Member $UserName `
             -ErrorAction SilentlyContinue
-
           Add-LocalGroupMember `
             -Group "Remote Desktop Users" `
             -Member $UserName `
             -ErrorAction SilentlyContinue
-
-          Write-Host "Enabling Remote Desktop..."
-
           Set-ItemProperty `
             -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
             -Name "fDenyTSConnections" `
             -Value 0
-
           Enable-NetFirewallRule `
             -DisplayGroup "Remote Desktop"
-
           Set-ItemProperty `
             -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
             -Name "UserAuthentication" `
             -Value 1
-
           Write-Host "================================"
           Write-Host "RDP USER READY"
           Write-Host "Username: 3NB"
-          Write-Host "Password: aboatb2026!"
           Write-Host "================================"
-
-
       # =========================================================
-      # 2. تحسين أداء Windows
+      # 5. ربط Desktop / Downloads / Documents
+      #    مباشرةً بالمجلد الدائم
+      # =========================================================
+      - name: Connect Persistent User Folders
+        shell: powershell
+        run: |
+          $Base = "C:\RDPData"
+          $UserProfile = "C:\Users\3NB"
+          New-Item `
+            -ItemType Directory `
+            -Path $UserProfile `
+            -Force | Out-Null
+          $Mappings = @{
+              "Desktop"   = "$Base\Desktop"
+              "Downloads" = "$Base\Downloads"
+              "Documents" = "$Base\Documents"
+              "Pictures"  = "$Base\Pictures"
+              "Videos"    = "$Base\Videos"
+              "Music"     = "$Base\Music"
+          }
+          foreach ($Name in $Mappings.Keys) {
+              $Source = $Mappings[$Name]
+              $Target = Join-Path $UserProfile $Name
+              New-Item `
+                -ItemType Directory `
+                -Path $Source `
+                -Force | Out-Null
+              if (Test-Path $Target) {
+                  $Item = Get-Item `
+                    -Path $Target `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+                  if ($Item -and $Item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                      cmd.exe /c "rmdir `"$Target`"" 2>$null
+                  }
+                  else {
+                      Remove-Item `
+                        -Path $Target `
+                        -Recurse `
+                        -Force `
+                        -ErrorAction SilentlyContinue
+                  }
+              }
+              Write-Host "$Name -> $Source"
+              cmd.exe /c "mklink /J `"$Target`" `"$Source`""
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Host "WARNING: Could not create junction for $Name."
+              }
+          }
+          Write-Host "Persistent folders connected."
+      # =========================================================
+      # 6. تحسين أداء Windows
       # =========================================================
       - name: Windows Performance Optimization
         shell: powershell
         run: |
           Write-Host "Optimizing Windows..."
-
           powercfg /setactive SCHEME_MIN
-
           powercfg /change -standby-timeout-ac 0
           powercfg /change -hibernate-timeout-ac 0
           powercfg /hibernate off
-
           Set-ItemProperty `
             -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
             -Name "VisualFXSetting" `
             -Type DWord `
             -Value 2
-
-          Stop-Service WSearch -Force -ErrorAction SilentlyContinue
-          Set-Service WSearch -StartupType Disabled -ErrorAction SilentlyContinue
-
-          Stop-Service SysMain -Force -ErrorAction SilentlyContinue
-          Set-Service SysMain -StartupType Disabled -ErrorAction SilentlyContinue
-
+          Stop-Service WSearch `
+            -Force `
+            -ErrorAction SilentlyContinue
+          Set-Service WSearch `
+            -StartupType Disabled `
+            -ErrorAction SilentlyContinue
+          Stop-Service SysMain `
+            -Force `
+            -ErrorAction SilentlyContinue
+          Set-Service SysMain `
+            -StartupType Disabled `
+            -ErrorAction SilentlyContinue
           New-Item `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
             -Force | Out-Null
-
           Set-ItemProperty `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
             -Name "fDisableWallpaper" `
             -Type DWord `
             -Value 1
-
           Set-ItemProperty `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
             -Name "fDisableFullWindowDrag" `
             -Type DWord `
             -Value 1
-
           Set-ItemProperty `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
             -Name "fDisableMenuAnims" `
             -Type DWord `
             -Value 1
-
           Set-ItemProperty `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
             -Name "fDisableThemes" `
             -Type DWord `
             -Value 1
-
           Write-Host "Performance optimization complete."
-
-
       # =========================================================
-      # 3. تثبيت Tailscale
+      # 7. تثبيت Tailscale
       # =========================================================
       - name: Install Tailscale
         shell: powershell
         env:
           TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
         run: |
-          Write-Host "Downloading Tailscale..."
-
           $Installer = "$env:TEMP\tailscale-setup.msi"
-
+          Write-Host "Downloading Tailscale..."
           Invoke-WebRequest `
             -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" `
             -OutFile $Installer
-
           Write-Host "Installing Tailscale..."
-
           Start-Process msiexec.exe `
             -ArgumentList "/i `"$Installer`" /qn /norestart" `
             -Wait
-
           Start-Sleep -Seconds 5
-
           $Tailscale = "C:\Program Files\Tailscale\tailscale.exe"
-
           if (!(Test-Path $Tailscale)) {
               Write-Error "Tailscale installation failed."
               exit 1
           }
-
           if ([string]::IsNullOrWhiteSpace($env:TS_AUTH_KEY)) {
               Write-Error "TS_AUTH_KEY secret is missing."
               exit 1
           }
-
-          Write-Host "Connecting Tailscale..."
-
           & $Tailscale up `
             --authkey="$env:TS_AUTH_KEY" `
             --hostname="github-rdp-v6"
-
           Start-Sleep -Seconds 5
-
           Write-Host "Tailscale status:"
           & $Tailscale status
-
-
       # =========================================================
-      # 4. فحص WinGet فقط
+      # 8. فحص WinGet
       # =========================================================
       - name: Check WinGet
         shell: powershell
         continue-on-error: true
         run: |
-          Write-Host "Checking WinGet..."
-
-          $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-
+          $Winget = Get-Command winget.exe `
+            -ErrorAction SilentlyContinue
           if ($Winget) {
               Write-Host "WinGet found."
               winget --version
           }
           else {
-              Write-Host "WinGet is not available."
-              Write-Host "Continuing without WinGet."
+              Write-Host "WinGet unavailable."
           }
-
-
       # =========================================================
-      # 5. محاولة تثبيت ChatGPT
+      # 9. ChatGPT
       # =========================================================
       - name: Install ChatGPT
         shell: powershell
         continue-on-error: true
         run: |
-          Write-Host "Trying to install ChatGPT..."
-
-          $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-
+          $Winget = Get-Command winget.exe `
+            -ErrorAction SilentlyContinue
           if (!$Winget) {
-              Write-Host "WinGet unavailable - skipping ChatGPT app."
               exit 0
           }
-
           try {
               winget install `
                 --id 9NT1R1C2HH7J `
@@ -224,31 +355,22 @@ jobs:
                 --silent `
                 --accept-package-agreements `
                 --accept-source-agreements
-
-              Write-Host "ChatGPT installation command finished."
           }
           catch {
-              Write-Host "ChatGPT app installation was unavailable."
-              Write-Host "Continuing workflow..."
+              Write-Host "ChatGPT installation unavailable."
           }
-
-
       # =========================================================
-      # 6. محاولة تثبيت Codex
+      # 10. Codex
       # =========================================================
       - name: Install Codex
         shell: powershell
         continue-on-error: true
         run: |
-          Write-Host "Trying to install Codex..."
-
-          $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-
+          $Winget = Get-Command winget.exe `
+            -ErrorAction SilentlyContinue
           if (!$Winget) {
-              Write-Host "WinGet unavailable - skipping Codex app."
               exit 0
           }
-
           try {
               winget install `
                 --id 9PLM9XGG6VKS `
@@ -257,135 +379,93 @@ jobs:
                 --silent `
                 --accept-package-agreements `
                 --accept-source-agreements
-
-              Write-Host "Codex installation command finished."
           }
           catch {
-              Write-Host "Codex app installation was unavailable."
-              Write-Host "Continuing workflow..."
+              Write-Host "Codex installation unavailable."
           }
-
-
       # =========================================================
-      # 7. إنشاء اختصار ChatGPT
+      # 11. اختصار ChatGPT
       # =========================================================
       - name: Create ChatGPT Shortcut
         shell: powershell
         run: |
-          Write-Host "Creating ChatGPT shortcut..."
-
-          $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
-
+          $Desktop = [Environment]::GetFolderPath(
+              "CommonDesktopDirectory"
+          )
           $ChromePaths = @(
               "C:\Program Files\Google\Chrome\Application\chrome.exe",
               "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
               "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
           )
-
           $Chrome = $null
-
           foreach ($Path in $ChromePaths) {
               if (Test-Path $Path) {
                   $Chrome = $Path
                   break
               }
           }
-
           if ($Chrome) {
-
-              $ShortcutPath = Join-Path $Desktop "ChatGPT.lnk"
-
+              $ShortcutPath = Join-Path `
+                $Desktop `
+                "ChatGPT.lnk"
               $Shell = New-Object -ComObject WScript.Shell
-              $Shortcut = $Shell.CreateShortcut($ShortcutPath)
-
+              $Shortcut = $Shell.CreateShortcut(
+                  $ShortcutPath
+              )
               $Shortcut.TargetPath = $Chrome
               $Shortcut.Arguments = "https://chatgpt.com"
               $Shortcut.WorkingDirectory = Split-Path $Chrome
               $Shortcut.Description = "Open ChatGPT"
-
               $Shortcut.Save()
-
-              Write-Host "ChatGPT shortcut created."
-
           }
-          else {
-              Write-Host "Chrome was not found."
-              Write-Host "Skipping shortcut."
-          }
-
-
       # =========================================================
-      # 8. تنظيف إضافي
+      # 12. تنظيف
       # =========================================================
       - name: Final Windows Cleanup
         shell: powershell
         run: |
-          Write-Host "Final cleanup..."
-
           $Processes = @(
               "OneDrive",
               "Teams",
               "Widgets",
               "SearchHost"
           )
-
           foreach ($ProcessName in $Processes) {
-              Get-Process $ProcessName -ErrorAction SilentlyContinue |
-                Stop-Process -Force -ErrorAction SilentlyContinue
+              Get-Process $ProcessName `
+                -ErrorAction SilentlyContinue |
+                Stop-Process `
+                -Force `
+                -ErrorAction SilentlyContinue
           }
-
-          Write-Host "Cleanup complete."
-
-
       # =========================================================
-      # 9. ROBLOX STUDIO - آخر تثبيت
+      # 13. تثبيت Roblox Studio
       # =========================================================
       - name: Install Roblox Studio
         shell: powershell
         run: |
-          Write-Host "======================================"
           Write-Host "Installing Roblox Studio..."
-          Write-Host "This is the final installation step."
-          Write-Host "======================================"
-
           $Installer = "$env:TEMP\RobloxStudioLauncherBeta.exe"
-
-          Write-Host "Downloading official Roblox Studio installer..."
-
           Invoke-WebRequest `
             -Uri "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
             -OutFile $Installer
-
           if (!(Test-Path $Installer)) {
               Write-Error "Roblox Studio installer was not downloaded."
               exit 1
           }
-
-          Write-Host "Installing Roblox Studio..."
-
           $Process = Start-Process `
             -FilePath $Installer `
             -ArgumentList "-install" `
             -Wait `
             -PassThru
-
           Write-Host "Installer exit code: $($Process.ExitCode)"
-
           Start-Sleep -Seconds 10
-
-          Write-Host "Searching for RobloxStudioBeta.exe..."
-
           $RobloxExe = $null
-
           $SearchPaths = @(
               "C:\Program Files (x86)\Roblox\Versions",
               "$env:LOCALAPPDATA\Roblox\Versions"
           )
-
           foreach ($Path in $SearchPaths) {
-
               if (Test-Path $Path) {
-
                   $Found = Get-ChildItem `
                     -Path $Path `
                     -Filter "RobloxStudioBeta.exe" `
@@ -393,44 +473,78 @@ jobs:
                     -ErrorAction SilentlyContinue |
                     Sort-Object LastWriteTime -Descending |
                     Select-Object -First 1
-
                   if ($Found) {
                       $RobloxExe = $Found.FullName
                       break
                   }
               }
           }
-
           if (!$RobloxExe) {
-              Write-Error "Roblox Studio was not found after installation."
+              Write-Error `
+                "Roblox Studio was not found after installation."
               exit 1
           }
-
-          Write-Host "Roblox Studio found:"
-          Write-Host $RobloxExe
-
-          $Desktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
-
-          $ShortcutPath = Join-Path $Desktop "Roblox Studio.lnk"
-
+          $Desktop = [Environment]::GetFolderPath(
+              "CommonDesktopDirectory"
+          )
+          $ShortcutPath = Join-Path `
+            $Desktop `
+            "Roblox Studio.lnk"
           $Shell = New-Object -ComObject WScript.Shell
-          $Shortcut = $Shell.CreateShortcut($ShortcutPath)
-
+          $Shortcut = $Shell.CreateShortcut(
+              $ShortcutPath
+          )
           $Shortcut.TargetPath = $RobloxExe
           $Shortcut.WorkingDirectory = Split-Path $RobloxExe
           $Shortcut.Description = "Roblox Studio"
-
           $Shortcut.Save()
-
-          Write-Host "Roblox Studio shortcut created."
-
-          Write-Host "======================================"
-          Write-Host "ROBLOX STUDIO INSTALLATION COMPLETE"
-          Write-Host "======================================"
-
-
+          Write-Host "Roblox Studio ready."
       # =========================================================
-      # 10. معلومات الاتصال
+      # 14. حفظ بيانات Roblox
+      # =========================================================
+      - name: Preserve Roblox Data
+        shell: powershell
+        run: |
+          $PersistentRoblox = "C:\RDPData\Roblox"
+          New-Item `
+            -ItemType Directory `
+            -Path $PersistentRoblox `
+            -Force | Out-Null
+          $Locations = @(
+              "$env:LOCALAPPDATA\Roblox",
+              "$env:APPDATA\Roblox"
+          )
+          foreach ($Location in $Locations) {
+              if (Test-Path $Location) {
+                  $Name = Split-Path `
+                    $Location `
+                    -Leaf
+                  $Destination = Join-Path `
+                    $PersistentRoblox `
+                    $Name
+                  New-Item `
+                    -ItemType Directory `
+                    -Path $Destination `
+                    -Force | Out-Null
+                  robocopy `
+                    $Location `
+                    $Destination `
+                    /E `
+                    /COPY:DAT `
+                    /DCOPY:DAT `
+                    /R:2 `
+                    /W:2 `
+                    /NFL `
+                    /NDL `
+                    /NP
+                  if ($LASTEXITCODE -gt 7) {
+                      Write-Host `
+                        "Robocopy returned code $LASTEXITCODE"
+                  }
+              }
+          }
+      # =========================================================
+      # 15. معلومات الاتصال
       # =========================================================
       - name: Show RDP Information
         shell: powershell
@@ -445,21 +559,17 @@ jobs:
           Write-Host ""
           Write-Host "Tailscale IPv4:"
           Write-Host ""
-
-          $Tailscale = "C:\Program Files\Tailscale\tailscale.exe"
-
+          $Tailscale = `
+            "C:\Program Files\Tailscale\tailscale.exe"
           if (Test-Path $Tailscale) {
               & $Tailscale ip -4
           }
-
           Write-Host ""
           Write-Host "RDP Port: 3389"
           Write-Host "=========================================="
           Write-Host ""
-
-
       # =========================================================
-      # 11. إبقاء السيرفر شغال
+      # 16. إبقاء الـRunner شغال
       # =========================================================
       - name: Keep Runner Alive
         shell: powershell
@@ -470,10 +580,64 @@ jobs:
           Write-Host "Username: 3NB"
           Write-Host "Password: aboatb2026!"
           Write-Host ""
-          Write-Host "Runner will stay alive until timeout."
+          Write-Host "Runner will stay alive."
           Write-Host "=========================================="
-
-          while ($true) {
-              Start-Sleep -Seconds 999999
-              Write-Host "$(Get-Date) - RDP server still running..."
+          # 300 دقيقة = 5 ساعات تقريباً.
+          # الـjob نفسه لديه timeout قدره 350 دقيقة.
+          $EndTime = (Get-Date).AddMinutes(300)
+          while ((Get-Date) -lt $EndTime) {
+              Write-Host `
+                "$(Get-Date) - RDP server still running..."
+              Start-Sleep -Seconds 300
           }
+          Write-Host "Keep-alive period finished."
+      # =========================================================
+      # 17. فحص حجم البيانات قبل الرفع
+      # =========================================================
+      - name: Check Persistent Data
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "=========================================="
+          Write-Host "CHECKING PERSISTENT DATA"
+          Write-Host "=========================================="
+          if (!(Test-Path "C:\RDPData")) {
+              Write-Error "C:\RDPData does not exist."
+              exit 1
+          }
+          $Files = Get-ChildItem `
+            -Path "C:\RDPData" `
+            -Recurse `
+            -File `
+            -ErrorAction SilentlyContinue
+          $Size = ($Files |
+            Measure-Object -Property Length -Sum).Sum
+          if (!$Size) {
+              $Size = 0
+          }
+          $SizeGB = [Math]::Round(
+              $Size / 1GB,
+              2
+          )
+          Write-Host "Files: $($Files.Count)"
+          Write-Host "Size: $SizeGB GB"
+          Write-Host "=========================================="
+      # =========================================================
+      # 18. استبدال الـArtifact القديم بالنسخة الجديدة
+      #
+      # يوجد Artifact واحد فقط:
+      # rdp-persistent-data
+      #
+      # overwrite: true
+      # =========================================================
+      - name: Replace Persistent Artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rdp-persistent-data
+          path: C:\RDPData
+          retention-days: 90
+          compression-level: 6
+          overwrite: true
+          include-hidden-files: true
+          if-no-files-found: error
