@@ -102,7 +102,7 @@ jobs:
 
           Write-Host "rclone installed successfully."
 
-      # 3. Configure Google Drive using OAuth token
+      # 3. Configure Google Drive
       - name: Configure Google Drive
         shell: powershell
         env:
@@ -143,7 +143,7 @@ jobs:
 
           Write-Host "Google Drive connection OK."
 
-      # 4. Create persistent Drive folder
+      # 4. Create persistent Google Drive folder
       - name: Create persistent Google Drive folder
         shell: powershell
         run: |
@@ -348,12 +348,16 @@ jobs:
               "Music"
           )
 
-          $profilePath = "C:\Users\$env:RDP_USER"
+          # Use the actual Windows profile automatically.
+          # Example:
+          # C:\Users\3NB.runnervm99s1a
+          $profilePath = $env:USERPROFILE
 
-          New-Item `
-              -ItemType Directory `
-              -Force `
-              -Path $profilePath | Out-Null
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host " USER PROFILE"
+          Write-Host "=========================================="
+          Write-Host $profilePath
 
           foreach ($folder in $folders) {
 
@@ -364,6 +368,11 @@ jobs:
               $userPath = Join-Path `
                   $profilePath `
                   $folder
+
+              Write-Host ""
+              Write-Host "Processing: $folder"
+              Write-Host "User path: $userPath"
+              Write-Host "Persistent path: $persistentPath"
 
               New-Item `
                   -ItemType Directory `
@@ -379,6 +388,8 @@ jobs:
 
                   if ($item -and
                       -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+
+                      Write-Host "Copying existing files to persistent storage..."
 
                       Get-ChildItem `
                           -Path $userPath `
@@ -407,7 +418,8 @@ jobs:
               }
           }
 
-          Write-Host "Persistent user folders created."
+          Write-Host ""
+          Write-Host "Persistent user folders created successfully."
 
       # 10. Performance
       - name: Optimize Windows performance
@@ -516,7 +528,7 @@ jobs:
           Write-Host "Remote: gdrive:RDP-V6-Persistent"
           Write-Host "=========================================="
 
-      # 12. System info
+      # 12. System information
       - name: Show system information
         shell: powershell
         run: |
@@ -588,6 +600,7 @@ jobs:
           Write-Host "=========================================="
           Write-Host ""
           Write-Host "RDP User        : $env:RDP_USER"
+          Write-Host "Actual profile  : $env:USERPROFILE"
           Write-Host "Persistent data : C:\RDPData"
           Write-Host "Backup interval : 30 seconds"
           Write-Host "Google Drive    : RDP-V6-Persistent"
