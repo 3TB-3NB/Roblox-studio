@@ -10,46 +10,34 @@ jobs:
 
     env:
       RDP_USER: '3NB'
-      RDP_DATA: 'C:\RDPData'
+      RDP_PROFILE: 'C:\Users\3NB'
+
       RCLONE_DIR: 'C:\Rclone'
       RCLONE_EXE: 'C:\Rclone\rclone.exe'
       RCLONE_CONFIG: 'C:\Rclone\rclone.conf'
+
       RCLONE_REMOTE: 'gdrive:RDP-V6-Persistent'
-      SYNC_INTERVAL: '10'
+
+      SYNC_INTERVAL: '30'
 
     steps:
 
       # ============================================================
-      # 1. Prepare persistent folders
+      # 1. Prepare directories
       # ============================================================
-      - name: Prepare persistent storage
+      - name: Prepare directories
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "=========================================="
-          Write-Host " PREPARING PERSISTENT STORAGE"
-          Write-Host "=========================================="
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path $env:RCLONE_DIR |
+            Out-Null
 
-          New-Item -ItemType Directory -Force -Path $env:RDP_DATA | Out-Null
+          Write-Host "Rclone directory ready."
 
-          $folders = @(
-            "Desktop",
-            "Downloads",
-            "Documents",
-            "Pictures",
-            "Videos",
-            "Music"
-          )
-
-          foreach ($folder in $folders) {
-            New-Item `
-              -ItemType Directory `
-              -Force `
-              -Path (Join-Path $env:RDP_DATA $folder) | Out-Null
-          }
-
-          Write-Host "Persistent storage ready."
 
       # ============================================================
       # 2. Install rclone
@@ -59,25 +47,25 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "=========================================="
-          Write-Host " INSTALLING RCLONE"
-          Write-Host "=========================================="
-
-          New-Item -ItemType Directory -Force -Path $env:RCLONE_DIR | Out-Null
-
           $zip = "$env:TEMP\rclone.zip"
-
-          Invoke-WebRequest `
-            -Uri "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
-            -OutFile $zip
-
           $extract = "$env:TEMP\rclone_extract"
 
           if (Test-Path $extract) {
             Remove-Item $extract -Recurse -Force
           }
 
-          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          Write-Host "Downloading rclone..."
+
+          Invoke-WebRequest `
+            -Uri "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
+            -OutFile $zip
+
+          Write-Host "Extracting rclone..."
+
+          Expand-Archive `
+            -Path $zip `
+            -DestinationPath $extract `
+            -Force
 
           $exe = Get-ChildItem `
             -Path $extract `
@@ -90,11 +78,14 @@ jobs:
           }
 
           Copy-Item `
-            $exe.FullName `
-            $env:RCLONE_EXE `
+            -Path $exe.FullName `
+            -Destination $env:RCLONE_EXE `
             -Force
 
+          Write-Host "Rclone installed."
+
           & $env:RCLONE_EXE version
+
 
       # ============================================================
       # 3. Configure Google Drive
@@ -103,12 +94,9 @@ jobs:
         shell: powershell
         env:
           GOOGLE_RCLONE_TOKEN: ${{ secrets.GOOGLE_RCLONE_TOKEN }}
+
         run: |
           $ErrorActionPreference = "Stop"
-
-          Write-Host "=========================================="
-          Write-Host " CONFIGURING GOOGLE DRIVE"
-          Write-Host "=========================================="
 
           $token = $env:GOOGLE_RCLONE_TOKEN.Trim()
 
@@ -135,6 +123,8 @@ jobs:
             -Value $config `
             -Encoding UTF8
 
+          Write-Host "Testing Google Drive connection..."
+
           & $env:RCLONE_EXE `
             --config $env:RCLONE_CONFIG `
             lsd gdrive:
@@ -145,17 +135,14 @@ jobs:
 
           Write-Host "Google Drive connection OK."
 
+
       # ============================================================
-      # 4. Create remote persistent folder
+      # 4. Prepare Google Drive folder
       # ============================================================
       - name: Prepare Google Drive folder
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-
-          Write-Host "=========================================="
-          Write-Host " PREPARING GOOGLE DRIVE FOLDER"
-          Write-Host "=========================================="
 
           & $env:RCLONE_EXE `
             --config $env:RCLONE_CONFIG `
@@ -167,48 +154,21 @@ jobs:
 
           Write-Host "Google Drive folder is ready."
 
-      # ============================================================
-      # 5. Restore previous persistent data
-      # ============================================================
-      - name: Restore persistent data
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "=========================================="
-          Write-Host " RESTORING PREVIOUS DATA"
-          Write-Host "=========================================="
-
-          & $env:RCLONE_EXE `
-            --config $env:RCLONE_CONFIG `
-            sync `
-            $env:RCLONE_REMOTE `
-            $env:RDP_DATA `
-            --create-empty-src-dirs `
-            --transfers 4 `
-            --checkers 8 `
-            --fast-list `
-            --stats 10s
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "Restore failed."
-          }
-
-          Write-Host "Restore completed successfully."
 
       # ============================================================
-      # 6. Create RDP user
+      # 5. Configure RDP user
       # ============================================================
       - name: Configure RDP user
         shell: powershell
         env:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "=========================================="
-          Write-Host " CONFIGURING RDP USER"
-          Write-Host "=========================================="
+          if ([string]::IsNullOrWhiteSpace($env:RDP_PASSWORD)) {
+            throw "RDP_PASSWORD is empty."
+          }
 
           $password = ConvertTo-SecureString `
             $env:RDP_PASSWORD `
@@ -221,6 +181,8 @@ jobs:
 
           if (-not $existing) {
 
+            Write-Host "Creating RDP user..."
+
             New-LocalUser `
               -Name $env:RDP_USER `
               -Password $password `
@@ -229,16 +191,14 @@ jobs:
               -PasswordNeverExpires:$true `
               -AccountNeverExpires:$true
 
-            Write-Host "RDP user created."
+          }
+          else {
 
-          } else {
+            Write-Host "RDP user already exists."
 
             Set-LocalUser `
               -Name $env:RDP_USER `
               -Password $password
-
-            Write-Host "RDP user already exists."
-
           }
 
           Add-LocalGroupMember `
@@ -248,17 +208,14 @@ jobs:
 
           Write-Host "RDP user configured."
 
+
       # ============================================================
-      # 7. Enable Remote Desktop
+      # 6. Enable Remote Desktop
       # ============================================================
       - name: Enable Remote Desktop
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-
-          Write-Host "=========================================="
-          Write-Host " ENABLING REMOTE DESKTOP"
-          Write-Host "=========================================="
 
           Set-ItemProperty `
             -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
@@ -283,25 +240,31 @@ jobs:
 
           Write-Host "Remote Desktop enabled."
 
+
       # ============================================================
-      # 8. Install and connect Tailscale
+      # 7. Install Tailscale
       # ============================================================
       - name: Install Tailscale
         shell: powershell
         env:
           TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
+
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "=========================================="
-          Write-Host " INSTALLING TAILSCALE"
-          Write-Host "=========================================="
+          if ([string]::IsNullOrWhiteSpace($env:TS_AUTH_KEY)) {
+            throw "TS_AUTH_KEY is empty."
+          }
 
           $installer = "$env:TEMP\tailscale-setup.exe"
+
+          Write-Host "Downloading Tailscale..."
 
           Invoke-WebRequest `
             -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" `
             -OutFile $installer
+
+          Write-Host "Installing Tailscale..."
 
           Start-Process `
             -FilePath $installer `
@@ -313,6 +276,8 @@ jobs:
           if (-not (Test-Path $tailscale)) {
             throw "Tailscale was not installed."
           }
+
+          Write-Host "Connecting Tailscale..."
 
           & $tailscale up `
             --auth-key $env:TS_AUTH_KEY `
@@ -326,39 +291,21 @@ jobs:
 
           Write-Host "Tailscale connected."
 
+          Write-Host "Tailscale IPv4:"
+          & $tailscale ip -4
+
+
       # ============================================================
-      # 9. Prepare the ACTUAL RDP user's profile
-      #    and redirect Windows folders to RDPData
+      # 8. Initialize actual 3NB profile
       # ============================================================
-      - name: Configure persistent RDP user folders
+      - name: Initialize RDP user profile
         shell: powershell
         env:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "=========================================="
-          Write-Host " CONFIGURING RDP USER PROFILE"
-          Write-Host "=========================================="
-
-          # --------------------------------------------------------
-          # Get RDP user's SID
-          # --------------------------------------------------------
-          $localUser = Get-LocalUser -Name $env:RDP_USER
-
-          if (-not $localUser) {
-            throw "RDP user was not found."
-          }
-
-          $sid = $localUser.SID.Value
-
-          Write-Host "RDP USER : $env:RDP_USER"
-          Write-Host "RDP SID  : $sid"
-
-          # --------------------------------------------------------
-          # Start a tiny process as the RDP user.
-          # This forces Windows to create/load the real profile.
-          # --------------------------------------------------------
           $securePassword = ConvertTo-SecureString `
             $env:RDP_PASSWORD `
             -AsPlainText `
@@ -370,373 +317,293 @@ jobs:
               $securePassword
             )
 
-          Write-Host "Creating/loading RDP user profile..."
+          Write-Host "Initializing profile for $env:RDP_USER..."
 
-          $profileProcess = Start-Process `
+          Start-Process `
             -FilePath "powershell.exe" `
             -Credential $credential `
             -ArgumentList "-NoProfile", "-Command", "exit" `
-            -Wait `
-            -PassThru
+            -Wait
 
-          Start-Sleep -Seconds 2
+          Start-Sleep -Seconds 3
 
-          # --------------------------------------------------------
-          # Find exact Windows profile path from SID
-          # --------------------------------------------------------
-          $profile = Get-CimInstance Win32_UserProfile |
-            Where-Object {
-              $_.SID -eq $sid
-            } |
-            Select-Object -First 1
-
-          if (-not $profile) {
-
-            $profileReg = `
-              "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid"
-
-            if (Test-Path $profileReg) {
-              $profilePath = (
-                Get-ItemProperty `
-                  -Path $profileReg `
-                  -Name ProfileImagePath
-              ).ProfileImagePath
-            }
-            else {
-              $profilePath = "C:\Users\$env:RDP_USER"
-            }
-
-          } else {
-
-            $profilePath = $profile.LocalPath
-
+          if (-not (Test-Path $env:RDP_PROFILE)) {
+            New-Item `
+              -ItemType Directory `
+              -Force `
+              -Path $env:RDP_PROFILE |
+              Out-Null
           }
 
-          $profilePath = [Environment]::ExpandEnvironmentVariables(
-            $profilePath
+          $folders = @(
+            "Desktop",
+            "Downloads",
+            "Documents",
+            "Pictures",
+            "Videos",
+            "Music"
           )
 
-          Write-Host "=========================================="
-          Write-Host " ACTUAL RDP PROFILE"
-          Write-Host "=========================================="
-          Write-Host $profilePath
-          Write-Host "=========================================="
+          foreach ($folder in $folders) {
 
-          if (-not (Test-Path $profilePath)) {
+            $path = Join-Path `
+              $env:RDP_PROFILE `
+              $folder
+
             New-Item `
               -ItemType Directory `
               -Force `
-              -Path $profilePath | Out-Null
+              -Path $path |
+              Out-Null
           }
 
-          # --------------------------------------------------------
-          # Copy existing user files safely.
-          # /XJ prevents following Windows junctions.
-          # Robocopy exit codes below 8 are not fatal.
-          # --------------------------------------------------------
-          $folderMap = @{
-            "Desktop"   = "Desktop"
-            "Downloads" = "Downloads"
-            "Documents" = "Documents"
-            "Pictures"  = "Pictures"
-            "Videos"    = "Videos"
-            "Music"     = "Music"
-          }
+          Write-Host "Profile ready:"
+          Write-Host $env:RDP_PROFILE
 
-          foreach ($name in $folderMap.Keys) {
 
-            $source = Join-Path $profilePath $name
-            $target = Join-Path $env:RDP_DATA $folderMap[$name]
+      # ============================================================
+      # 9. Restore persistent files
+      # ============================================================
+      - name: Restore persistent files
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $maps = @(
+            @{
+              Name   = "Desktop"
+              Local  = "$env:RDP_PROFILE\Desktop"
+              Remote = "$env:RCLONE_REMOTE/Desktop"
+            },
+            @{
+              Name   = "Downloads"
+              Local  = "$env:RDP_PROFILE\Downloads"
+              Remote = "$env:RCLONE_REMOTE/Downloads"
+            },
+            @{
+              Name   = "Documents"
+              Local  = "$env:RDP_PROFILE\Documents"
+              Remote = "$env:RCLONE_REMOTE/Documents"
+            },
+            @{
+              Name   = "Pictures"
+              Local  = "$env:RDP_PROFILE\Pictures"
+              Remote = "$env:RCLONE_REMOTE/Pictures"
+            },
+            @{
+              Name   = "Videos"
+              Local  = "$env:RDP_PROFILE\Videos"
+              Remote = "$env:RCLONE_REMOTE/Videos"
+            },
+            @{
+              Name   = "Music"
+              Local  = "$env:RDP_PROFILE\Music"
+              Remote = "$env:RCLONE_REMOTE/Music"
+            }
+          )
+
+          foreach ($map in $maps) {
 
             Write-Host ""
-            Write-Host "Processing: $name"
-            Write-Host "Source: $source"
-            Write-Host "Target: $target"
+            Write-Host "=========================================="
+            Write-Host "Restoring $($map.Name)"
+            Write-Host "Remote: $($map.Remote)"
+            Write-Host "Local:  $($map.Local)"
+            Write-Host "=========================================="
 
             New-Item `
               -ItemType Directory `
               -Force `
-              -Path $target | Out-Null
+              -Path $map.Local |
+              Out-Null
 
-            if (Test-Path $source) {
-
-              Write-Host "Copying existing files..."
-
-              & robocopy.exe `
-                $source `
-                $target `
-                /E `
-                /XJ `
-                /R:0 `
-                /W:0 `
-                /COPY:DAT `
-                /DCOPY:DAT `
-                /FFT `
-                /NFL `
-                /NDL `
-                /NP
-
-              $rc = $LASTEXITCODE
-
-              if ($rc -ge 8) {
-                Write-Host "Robocopy reported non-fatal/partial result: $rc"
-              }
-              else {
-                Write-Host "Copy completed: $rc"
-              }
-
-            } else {
-
-              Write-Host "Source folder does not exist yet."
-
-            }
-          }
-
-          # --------------------------------------------------------
-          # Configure Windows "User Shell Folders".
-          # This avoids deleting protected Windows folders.
-          # --------------------------------------------------------
-
-          $hiveName = "RDP_TEMP_$($env:RDP_USER)"
-
-          $sidHive = "Registry::HKEY_USERS\$sid"
-          $tempHive = "Registry::HKEY_USERS\$hiveName"
-
-          $hiveLoadedByUs = $false
-
-          if (Test-Path $sidHive) {
-
-            Write-Host "RDP user hive is already loaded."
-
-            $targetHive = $sidHive
-
-          } else {
-
-            $ntuser = Join-Path $profilePath "NTUSER.DAT"
-
-            if (-not (Test-Path $ntuser)) {
-              throw "NTUSER.DAT was not found at $ntuser"
-            }
-
-            Write-Host "Loading RDP user registry hive..."
-
-            & reg.exe load "HKU\$hiveName" "$ntuser"
+            & $env:RCLONE_EXE `
+              --config $env:RCLONE_CONFIG `
+              copy $map.Remote $map.Local `
+              --create-empty-src-dirs `
+              --transfers 4 `
+              --checkers 8 `
+              --fast-list `
+              --stats 10s
 
             if ($LASTEXITCODE -ne 0) {
-              throw "Could not load RDP user registry hive."
-            }
-
-            $targetHive = $tempHive
-            $hiveLoadedByUs = $true
-          }
-
-          $userShellFolders = `
-            "$targetHive\Software\Microsoft\Windows\CurrentVersion\User Shell Folders"
-
-          $shellFolders = `
-            "$targetHive\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
-
-          New-Item `
-            -Path $userShellFolders `
-            -Force | Out-Null
-
-          New-Item `
-            -Path $shellFolders `
-            -Force | Out-Null
-
-          # Desktop
-          Set-ItemProperty `
-            -Path $userShellFolders `
-            -Name "Desktop" `
-            -Value (Join-Path $env:RDP_DATA "Desktop")
-
-          Set-ItemProperty `
-            -Path $shellFolders `
-            -Name "Desktop" `
-            -Value (Join-Path $env:RDP_DATA "Desktop")
-
-          # Documents
-          Set-ItemProperty `
-            -Path $userShellFolders `
-            -Name "Personal" `
-            -Value (Join-Path $env:RDP_DATA "Documents")
-
-          Set-ItemProperty `
-            -Path $shellFolders `
-            -Name "Personal" `
-            -Value (Join-Path $env:RDP_DATA "Documents")
-
-          # Pictures
-          Set-ItemProperty `
-            -Path $userShellFolders `
-            -Name "My Pictures" `
-            -Value (Join-Path $env:RDP_DATA "Pictures")
-
-          Set-ItemProperty `
-            -Path $shellFolders `
-            -Name "My Pictures" `
-            -Value (Join-Path $env:RDP_DATA "Pictures")
-
-          # Videos
-          Set-ItemProperty `
-            -Path $userShellFolders `
-            -Name "My Video" `
-            -Value (Join-Path $env:RDP_DATA "Videos")
-
-          Set-ItemProperty `
-            -Path $shellFolders `
-            -Name "My Video" `
-            -Value (Join-Path $env:RDP_DATA "Videos")
-
-          # Music
-          Set-ItemProperty `
-            -Path $userShellFolders `
-            -Name "My Music" `
-            -Value (Join-Path $env:RDP_DATA "Music")
-
-          Set-ItemProperty `
-            -Path $shellFolders `
-            -Name "My Music" `
-            -Value (Join-Path $env:RDP_DATA "Music")
-
-          # Downloads
-          $downloadsGuid = `
-            "{374DE290-123F-4565-9164-39C4925E467B}"
-
-          Set-ItemProperty `
-            -Path $userShellFolders `
-            -Name $downloadsGuid `
-            -Value (Join-Path $env:RDP_DATA "Downloads")
-
-          Set-ItemProperty `
-            -Path $shellFolders `
-            -Name $downloadsGuid `
-            -Value (Join-Path $env:RDP_DATA "Downloads")
-
-          Write-Host "Windows folder redirection configured."
-
-          if ($hiveLoadedByUs) {
-
-            Write-Host "Unloading temporary registry hive..."
-
-            [gc]::Collect()
-            [gc]::WaitForPendingFinalizers()
-
-            & reg.exe unload "HKU\$hiveName"
-
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "Warning: registry hive could not be unloaded immediately."
+              throw "Restore failed for $($map.Name)."
             }
           }
 
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host " RDP PROFILE CONFIGURED"
+          Write-Host "RESTORE COMPLETED"
           Write-Host "=========================================="
 
+
       # ============================================================
-      # 10. Performance
+      # 10. Verify profile
+      # ============================================================
+      - name: Verify RDP profile
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=========================================="
+          Write-Host "RDP PROFILE"
+          Write-Host "=========================================="
+
+          Write-Host "User:"
+          Write-Host $env:RDP_USER
+
+          Write-Host ""
+          Write-Host "Profile:"
+          Write-Host $env:RDP_PROFILE
+
+          Write-Host ""
+          Write-Host "Folders:"
+
+          Get-ChildItem `
+            -Path $env:RDP_PROFILE `
+            -Directory |
+            Select-Object Name, FullName |
+            Format-Table -AutoSize
+
+
+      # ============================================================
+      # 11. Optimize Windows
       # ============================================================
       - name: Optimize Windows performance
         shell: powershell
         run: |
           $ErrorActionPreference = "SilentlyContinue"
 
-          Write-Host "=========================================="
-          Write-Host " OPTIMIZING WINDOWS"
-          Write-Host "=========================================="
-
           powercfg /setactive SCHEME_MIN
 
-          Set-ItemProperty `
-            -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" `
-            -Name "EnableTransparency" `
-            -Value 0 `
-            -ErrorAction SilentlyContinue
+          Write-Host "High Performance power plan enabled."
 
-          Set-ItemProperty `
-            -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
-            -Name "VisualFXSetting" `
-            -Value 2 `
-            -ErrorAction SilentlyContinue
-
-          Write-Host "Performance optimization complete."
 
       # ============================================================
-      # 11. Start continuous Google Drive sync
-      #     EVERY 10 SECONDS
+      # 12. Start continuous backup
       # ============================================================
       - name: Start continuous backup
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          Write-Host "=========================================="
-          Write-Host " STARTING CONTINUOUS BACKUP"
-          Write-Host "=========================================="
+          $scriptPath = "$env:RCLONE_DIR\continuous-sync.ps1"
 
           $script = @'
           $ErrorActionPreference = "SilentlyContinue"
 
           $rclone = "C:\Rclone\rclone.exe"
           $config = "C:\Rclone\rclone.conf"
-          $source = "C:\RDPData"
-          $remote = "gdrive:RDP-V6-Persistent"
-          $interval = 10
+
+          $profile = "C:\Users\3NB"
+
+          $interval = 30
 
           $log = "C:\Rclone\continuous-sync.log"
 
+          $maps = @(
+              @{
+                  Name   = "Desktop"
+                  Local  = "$profile\Desktop"
+                  Remote = "gdrive:RDP-V6-Persistent/Desktop"
+              },
+              @{
+                  Name   = "Downloads"
+                  Local  = "$profile\Downloads"
+                  Remote = "gdrive:RDP-V6-Persistent/Downloads"
+              },
+              @{
+                  Name   = "Documents"
+                  Local  = "$profile\Documents"
+                  Remote = "gdrive:RDP-V6-Persistent/Documents"
+              },
+              @{
+                  Name   = "Pictures"
+                  Local  = "$profile\Pictures"
+                  Remote = "gdrive:RDP-V6-Persistent/Pictures"
+              },
+              @{
+                  Name   = "Videos"
+                  Local  = "$profile\Videos"
+                  Remote = "gdrive:RDP-V6-Persistent/Videos"
+              },
+              @{
+                  Name   = "Music"
+                  Local  = "$profile\Music"
+                  Remote = "gdrive:RDP-V6-Persistent/Music"
+              }
+          )
+
+          Add-Content `
+              -Path $log `
+              -Value "============================================================"
+
+          Add-Content `
+              -Path $log `
+              -Value "Continuous sync started."
+
           while ($true) {
 
-              try {
+              foreach ($map in $maps) {
 
-                  $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                  try {
 
-                  Add-Content `
-                    -Path $log `
-                    -Value "[$timestamp] Sync started."
+                      if (-not (Test-Path $map.Local)) {
+                          New-Item `
+                              -ItemType Directory `
+                              -Force `
+                              -Path $map.Local |
+                              Out-Null
+                      }
 
-                  & $rclone `
-                    --config $config `
-                    sync `
-                    $source `
-                    $remote `
-                    --create-empty-src-dirs `
-                    --transfers 4 `
-                    --checkers 8 `
-                    --fast-list `
-                    --stats 0
+                      $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
-                  $exitCode = $LASTEXITCODE
+                      Add-Content `
+                          -Path $log `
+                          -Value "[$timestamp] Sync $($map.Name) started."
 
-                  $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                      & $rclone `
+                          --config $config `
+                          sync `
+                          $map.Local `
+                          $map.Remote `
+                          --create-empty-src-dirs `
+                          --transfers 4 `
+                          --checkers 8 `
+                          --fast-list `
+                          --stats 0
 
-                  Add-Content `
-                    -Path $log `
-                    -Value "[$timestamp] Sync finished. ExitCode=$exitCode"
+                      $exitCode = $LASTEXITCODE
 
-              }
-              catch {
+                      $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
-                  $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                      Add-Content `
+                          -Path $log `
+                          -Value "[$timestamp] Sync $($map.Name) finished. ExitCode=$exitCode"
 
-                  Add-Content `
-                    -Path $log `
-                    -Value "[$timestamp] Sync ERROR: $($_.Exception.Message)"
+                  }
+                  catch {
+
+                      $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+
+                      Add-Content `
+                          -Path $log `
+                          -Value "[$timestamp] ERROR $($map.Name): $($_.Exception.Message)"
+                  }
               }
 
               Start-Sleep -Seconds $interval
           }
-          '@
 
-          $scriptPath = "C:\Rclone\continuous-sync.ps1"
+          '@
 
           Set-Content `
             -Path $scriptPath `
             -Value $script `
             -Encoding UTF8
 
-          # Start hidden background process
+          Write-Host "Starting continuous backup..."
+
           Start-Process `
             -FilePath "powershell.exe" `
             -WindowStyle Hidden `
@@ -748,15 +615,31 @@ jobs:
               $scriptPath
             )
 
-          Write-Host "Continuous backup started."
-          Write-Host "Sync interval: 10 seconds."
+          Start-Sleep -Seconds 2
+
+          Write-Host "=========================================="
+          Write-Host "CONTINUOUS BACKUP STARTED"
+          Write-Host "=========================================="
+
+          Write-Host "Source:"
+          Write-Host "C:\Users\3NB"
+
+          Write-Host ""
+          Write-Host "Destination:"
+          Write-Host "gdrive:RDP-V6-Persistent"
+
+          Write-Host ""
+          Write-Host "Sync interval:"
+          Write-Host "30 seconds"
+
 
       # ============================================================
-      # 12. Show connection information
+      # 13. Show RDP information
       # ============================================================
       - name: Show RDP information
         shell: powershell
         run: |
+          Write-Host ""
           Write-Host "=========================================="
           Write-Host " WINDOWS RDP V6"
           Write-Host "=========================================="
@@ -766,36 +649,43 @@ jobs:
           Write-Host $env:RDP_USER
 
           Write-Host ""
-          Write-Host "TAILSCALE:"
+          Write-Host "RDP PROFILE:"
+          Write-Host $env:RDP_PROFILE
+
+          Write-Host ""
+          Write-Host "TAILSCALE IPv4:"
+
           & "C:\Program Files\Tailscale\tailscale.exe" ip -4
 
           Write-Host ""
-          Write-Host "RDP DATA:"
-          Write-Host $env:RDP_DATA
+          Write-Host "PERSISTENT STORAGE:"
+          Write-Host $env:RCLONE_REMOTE
 
           Write-Host ""
-          Write-Host "SYNC:"
-          Write-Host "Google Drive -> RDPData on startup"
-          Write-Host "RDPData -> Google Drive every 10 seconds"
+          Write-Host "RESTORE:"
+          Write-Host "Google Drive -> C:\Users\3NB on startup"
+
+          Write-Host ""
+          Write-Host "BACKUP:"
+          Write-Host "C:\Users\3NB -> Google Drive"
+
+          Write-Host ""
+          Write-Host "SYNC INTERVAL:"
+          Write-Host "30 seconds"
 
           Write-Host ""
           Write-Host "=========================================="
 
+
       # ============================================================
-      # 13. Keep runner alive
+      # 14. Keep RDP alive
       # ============================================================
       - name: Keep RDP alive
         shell: powershell
         run: |
-          Write-Host "=========================================="
-          Write-Host " RDP SESSION IS READY"
-          Write-Host "=========================================="
-          Write-Host "Continuous Google Drive sync: EVERY 10 SECONDS"
-          Write-Host "Runner timeout: 350 minutes"
-          Write-Host ""
-
           while ($true) {
 
+            Write-Host ""
             Write-Host "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - RDP alive"
 
             Start-Sleep -Seconds 400
