@@ -19,14 +19,11 @@ jobs:
 
     steps:
 
-      # ============================================================
-      # 1. تجهيز التخزين
-      # ============================================================
-
+      # 1. Prepare persistent storage
       - name: Prepare persistent storage
         shell: powershell
         env:
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_RCLONE_TOKEN: ${{ secrets.GOOGLE_RCLONE_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -40,36 +37,36 @@ jobs:
               -Force `
               -Path $env:RCLONE_DIR | Out-Null
 
-          if ([string]::IsNullOrWhiteSpace($env:GOOGLE_SERVICE_ACCOUNT_JSON)) {
-              throw "GOOGLE_SERVICE_ACCOUNT_JSON secret is empty."
+          if ([string]::IsNullOrWhiteSpace($env:GOOGLE_RCLONE_TOKEN)) {
+              throw "GOOGLE_RCLONE_TOKEN secret is empty."
           }
-
-          $jsonPath = Join-Path `
-              $env:RCLONE_DIR `
-              "service-account.json"
-
-          [System.IO.File]::WriteAllText(
-              $jsonPath,
-              $env:GOOGLE_SERVICE_ACCOUNT_JSON,
-              [System.Text.UTF8Encoding]::new($false)
-          )
 
           Write-Host "Persistent storage prepared."
 
-      # ============================================================
-      # 2. تنزيل rclone فقط للحفظ
-      # ============================================================
-
+      # 2. Install rclone
       - name: Install rclone
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          $zipPath = Join-Path $env:TEMP "rclone.zip"
-          $extractPath = Join-Path $env:TEMP "rclone_extract"
+          $zipPath = Join-Path `
+              $env:TEMP `
+              "rclone.zip"
 
-          Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-          Remove-Item $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+          $extractPath = Join-Path `
+              $env:TEMP `
+              "rclone_extract"
+
+          Remove-Item `
+              $zipPath `
+              -Force `
+              -ErrorAction SilentlyContinue
+
+          Remove-Item `
+              $extractPath `
+              -Recurse `
+              -Force `
+              -ErrorAction SilentlyContinue
 
           Write-Host "Downloading rclone..."
 
@@ -105,20 +102,28 @@ jobs:
 
           Write-Host "rclone installed successfully."
 
-      # ============================================================
-      # 3. إعداد Google Drive
-      # ============================================================
-
+      # 3. Configure Google Drive using OAuth token
       - name: Configure Google Drive
         shell: powershell
+        env:
+          GOOGLE_RCLONE_TOKEN: ${{ secrets.GOOGLE_RCLONE_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
+
+          $token = $env:GOOGLE_RCLONE_TOKEN.Trim()
+
+          try {
+              $null = $token | ConvertFrom-Json
+          }
+          catch {
+              throw "GOOGLE_RCLONE_TOKEN is not valid JSON."
+          }
 
           $config = @"
           [gdrive]
           type = drive
           scope = drive
-          service_account_file = C:\Rclone\service-account.json
+          token = $token
           "@
 
           Set-Content `
@@ -138,10 +143,7 @@ jobs:
 
           Write-Host "Google Drive connection OK."
 
-      # ============================================================
-      # 4. إنشاء مجلد الحفظ
-      # ============================================================
-
+      # 4. Create persistent Drive folder
       - name: Create persistent Google Drive folder
         shell: powershell
         run: |
@@ -170,10 +172,7 @@ jobs:
               throw "Google Drive folder verification failed."
           }
 
-      # ============================================================
-      # 5. استرجاع الملفات المحفوظة
-      # ============================================================
-
+      # 5. Restore saved files
       - name: Restore saved files
         shell: powershell
         run: |
@@ -205,10 +204,7 @@ jobs:
 
           Write-Host "Restore completed successfully."
 
-      # ============================================================
-      # 6. إنشاء مستخدم RDP
-      # ============================================================
-
+      # 6. Configure RDP user
       - name: Configure RDP user
         shell: powershell
         env:
@@ -256,10 +252,7 @@ jobs:
 
           Write-Host "RDP user configured."
 
-      # ============================================================
-      # 7. تشغيل RDP
-      # ============================================================
-
+      # 7. Enable RDP
       - name: Enable Remote Desktop
         shell: powershell
         run: |
@@ -284,10 +277,7 @@ jobs:
 
           Write-Host "Remote Desktop enabled."
 
-      # ============================================================
       # 8. Tailscale
-      # ============================================================
-
       - name: Install and connect Tailscale
         shell: powershell
         env:
@@ -343,10 +333,7 @@ jobs:
 
           & $tailscale ip -4
 
-      # ============================================================
-      # 9. مجلدات المستخدم المحفوظة
-      # ============================================================
-
+      # 9. Persistent user folders
       - name: Create persistent user folders
         shell: powershell
         run: |
@@ -422,19 +409,14 @@ jobs:
 
           Write-Host "Persistent user folders created."
 
-      # ============================================================
-      # 10. تحسين الأداء
-      # ============================================================
-
+      # 10. Performance
       - name: Optimize Windows performance
         shell: powershell
         run: |
           $ErrorActionPreference = "SilentlyContinue"
 
-          # High Performance
           powercfg /setactive SCHEME_MIN
 
-          # تقليل المؤثرات البصرية
           $visualEffects = `
               "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"
 
@@ -448,7 +430,6 @@ jobs:
               -Type DWord `
               -Value 2
 
-          # إيقاف الشفافية
           $personalize = `
               "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
 
@@ -462,7 +443,6 @@ jobs:
               -Type DWord `
               -Value 0
 
-          # تقليل تأخير القوائم
           $desktop = "HKCU:\Control Panel\Desktop"
 
           Set-ItemProperty `
@@ -472,10 +452,7 @@ jobs:
 
           Write-Host "Performance optimizations applied."
 
-      # ============================================================
-      # 11. بدء الحفظ المستمر
-      # ============================================================
-
+      # 11. Continuous backup
       - name: Start continuous backup
         shell: powershell
         run: |
@@ -539,10 +516,7 @@ jobs:
           Write-Host "Remote: gdrive:RDP-V6-Persistent"
           Write-Host "=========================================="
 
-      # ============================================================
-      # 12. معلومات الجهاز والشبكة
-      # ============================================================
-
+      # 12. System info
       - name: Show system information
         shell: powershell
         run: |
@@ -604,10 +578,7 @@ jobs:
                   }} |
               Format-Table -AutoSize
 
-      # ============================================================
-      # 13. إبقاء الـRunner شغال
-      # ============================================================
-
+      # 13. Keep runner alive
       - name: Keep RDP alive
         shell: powershell
         run: |
