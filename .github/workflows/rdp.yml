@@ -10,187 +10,16 @@ jobs:
   rdp:
     runs-on: windows-2025
 
-    # GitHub Actions maximum lifetime for this workflow
-    timeout-minutes: 350
+    timeout-minutes: 3500
 
     env:
       RDP_USER: '3NB'
       RDP_PROFILE: 'C:\Users\3NB'
 
-      RCLONE_DIR: 'C:\Rclone'
-      RCLONE_EXE: 'C:\Rclone\rclone.exe'
-      RCLONE_CONFIG: 'C:\Rclone\rclone.conf'
-      RCLONE_REMOTE: 'gdrive:RDP-V6-Persistent'
-
-      SYNC_INTERVAL: '30'
-
     steps:
 
       # ============================================================
       # STEP 1
-      # Create Rclone directory
-      # ============================================================
-      - name: Create Rclone directory
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $env:RCLONE_DIR `
-            -Force | Out-Null
-
-          Write-Host "Rclone directory ready:"
-          Write-Host $env:RCLONE_DIR
-
-
-      # ============================================================
-      # STEP 2
-      # Install Rclone
-      # ============================================================
-      - name: Install Rclone
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $zipPath = Join-Path $env:TEMP "rclone.zip"
-          $extractPath = Join-Path $env:TEMP "rclone-extract"
-
-          Write-Host "Downloading rclone..."
-
-          Invoke-WebRequest `
-            -Uri "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
-            -OutFile $zipPath
-
-          if (Test-Path $extractPath) {
-              Remove-Item `
-                $extractPath `
-                -Recurse `
-                -Force
-          }
-
-          New-Item `
-            -ItemType Directory `
-            -Path $extractPath `
-            -Force | Out-Null
-
-          Write-Host "Extracting rclone..."
-
-          Expand-Archive `
-            -Path $zipPath `
-            -DestinationPath $extractPath `
-            -Force
-
-          $rcloneSource = Get-ChildItem `
-            -Path $extractPath `
-            -Filter "rclone.exe" `
-            -Recurse `
-            -File |
-            Select-Object -First 1
-
-          if (-not $rcloneSource) {
-              throw "rclone.exe was not found."
-          }
-
-          Copy-Item `
-            -Path $rcloneSource.FullName `
-            -Destination $env:RCLONE_EXE `
-            -Force
-
-          if (-not (Test-Path $env:RCLONE_EXE)) {
-              throw "rclone installation failed."
-          }
-
-          Write-Host ""
-          Write-Host "Rclone installed successfully."
-          Write-Host ""
-
-          & $env:RCLONE_EXE version
-
-          if ($LASTEXITCODE -ne 0) {
-              throw "rclone version check failed."
-          }
-
-
-      # ============================================================
-      # STEP 3
-      # Configure Google Drive
-      # ============================================================
-      - name: Configure Google Drive
-        shell: powershell
-        env:
-          GOOGLE_RCLONE_TOKEN: ${{ secrets.GOOGLE_RCLONE_TOKEN }}
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          if ([string]::IsNullOrWhiteSpace($env:GOOGLE_RCLONE_TOKEN)) {
-              throw "GOOGLE_RCLONE_TOKEN secret is missing."
-          }
-
-          Write-Host "Validating Google Drive token..."
-
-          try {
-              $null = $env:GOOGLE_RCLONE_TOKEN | ConvertFrom-Json
-          }
-          catch {
-              throw "GOOGLE_RCLONE_TOKEN is not valid JSON."
-          }
-
-          $configContent = @"
-          [gdrive]
-          type = drive
-          scope = drive
-          token = $env:GOOGLE_RCLONE_TOKEN
-          "@
-
-          Set-Content `
-            -Path $env:RCLONE_CONFIG `
-            -Value $configContent `
-            -Encoding UTF8
-
-          if (-not (Test-Path $env:RCLONE_CONFIG)) {
-              throw "Failed to create rclone.conf."
-          }
-
-          Write-Host "Testing Google Drive..."
-
-          & $env:RCLONE_EXE `
-            --config $env:RCLONE_CONFIG `
-            lsd `
-            "gdrive:"
-
-          if ($LASTEXITCODE -ne 0) {
-              throw "Google Drive connection failed."
-          }
-
-          Write-Host "Google Drive connection OK."
-
-
-      # ============================================================
-      # STEP 4
-      # Create persistent directory
-      # ============================================================
-      - name: Create persistent Google Drive directory
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "Creating persistent directory..."
-
-          & $env:RCLONE_EXE `
-            --config $env:RCLONE_CONFIG `
-            mkdir `
-            $env:RCLONE_REMOTE
-
-          if ($LASTEXITCODE -ne 0) {
-              throw "Failed to create persistent directory."
-          }
-
-          Write-Host "Persistent directory ready."
-
-
-      # ============================================================
-      # STEP 5
       # Configure RDP user
       # ============================================================
       - name: Configure RDP user
@@ -220,7 +49,6 @@ jobs:
               Set-LocalUser `
                 -Name $env:RDP_USER `
                 -Password $securePassword
-
           }
           else {
 
@@ -244,7 +72,7 @@ jobs:
 
 
       # ============================================================
-      # STEP 6
+      # STEP 2
       # Enable Remote Desktop
       # ============================================================
       - name: Enable Remote Desktop
@@ -280,7 +108,7 @@ jobs:
 
 
       # ============================================================
-      # STEP 7
+      # STEP 3
       # Install and configure Tailscale
       # ============================================================
       - name: Install and configure Tailscale
@@ -339,7 +167,7 @@ jobs:
 
 
       # ============================================================
-      # STEP 8
+      # STEP 4
       # Initialize RDP profile
       # ============================================================
       - name: Initialize RDP profile
@@ -425,402 +253,455 @@ jobs:
 
 
       # ============================================================
-      # STEP 9
+      # STEP 5
+      # PERFORMANCE OPTIMIZATION
       #
-      # RESTORE LAST SAVED DATA
+      # Target:
+      # Ghidra + RDP
       #
-      # IMPORTANT:
-      # This happens BEFORE continuous mirror starts.
-      #
-      # Google Drive -> NEW RDP
-      #
-      # We intentionally use COPY here.
+      # We intentionally DO NOT disable:
+      # - Windows Defender
+      # - Windows Update
+      # - Networking
+      # - RDP
+      # - Tailscale
+      # - RPC
+      # - Java dependencies
       # ============================================================
-      - name: Restore latest persistent files
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $maps = @(
-              @{
-                  Name   = "Desktop"
-                  Local  = "$env:RDP_PROFILE\Desktop"
-                  Remote = "$env:RCLONE_REMOTE/Desktop"
-              },
-              @{
-                  Name   = "Downloads"
-                  Local  = "$env:RDP_PROFILE\Downloads"
-                  Remote = "$env:RCLONE_REMOTE/Downloads"
-              },
-              @{
-                  Name   = "Documents"
-                  Local  = "$env:RDP_PROFILE\Documents"
-                  Remote = "$env:RCLONE_REMOTE/Documents"
-              },
-              @{
-                  Name   = "Pictures"
-                  Local  = "$env:RDP_PROFILE\Pictures"
-                  Remote = "$env:RCLONE_REMOTE/Pictures"
-              },
-              @{
-                  Name   = "Videos"
-                  Local  = "$env:RDP_PROFILE\Videos"
-                  Remote = "$env:RCLONE_REMOTE/Videos"
-              },
-              @{
-                  Name   = "Music"
-                  Local  = "$env:RDP_PROFILE\Music"
-                  Remote = "$env:RCLONE_REMOTE/Music"
-              }
-          )
-
-          Write-Host ""
-          Write-Host "============================================================"
-          Write-Host "RESTORING LAST SAVED DATA"
-          Write-Host "============================================================"
-
-          foreach ($map in $maps) {
-
-              Write-Host ""
-              Write-Host "Restoring: $($map.Name)"
-              Write-Host "From: $($map.Remote)"
-              Write-Host "To  : $($map.Local)"
-
-              New-Item `
-                -ItemType Directory `
-                -Path $map.Local `
-                -Force | Out-Null
-
-              & $env:RCLONE_EXE `
-                --config $env:RCLONE_CONFIG `
-                copy `
-                $map.Remote `
-                $map.Local `
-                --create-empty-src-dirs `
-                --transfers 2 `
-                --checkers 8 `
-                --retries 10 `
-                --low-level-retries 20 `
-                --retries-sleep 10s `
-                --timeout 15m `
-                --contimeout 60s `
-                --drive-chunk-size 64Mi `
-                --stats 10s
-
-              if ($LASTEXITCODE -ne 0) {
-                  throw "Restore failed for $($map.Name). ExitCode=$LASTEXITCODE"
-              }
-
-              Write-Host "Restore completed: $($map.Name)"
-          }
-
-          Write-Host ""
-          Write-Host "============================================================"
-          Write-Host "ALL DATA RESTORED"
-          Write-Host "============================================================"
-
-
-      # ============================================================
-      # STEP 10
-      # Verify restored profile
-      # ============================================================
-      - name: Verify restored profile
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          if (-not (Test-Path $env:RDP_PROFILE)) {
-              throw "RDP profile does not exist."
-          }
-
-          $folders = @(
-              "Desktop",
-              "Downloads",
-              "Documents",
-              "Pictures",
-              "Videos",
-              "Music"
-          )
-
-          foreach ($folder in $folders) {
-
-              $path = Join-Path `
-                $env:RDP_PROFILE `
-                $folder
-
-              if (-not (Test-Path $path)) {
-                  throw "Missing folder: $path"
-              }
-
-              Write-Host "Verified: $path"
-          }
-
-          Write-Host ""
-          Write-Host "Profile verification successful."
-
-
-      # ============================================================
-      # STEP 11
-      # Power configuration
-      # ============================================================
-      - name: Configure power settings
+      - name: Optimize Windows for Ghidra
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
+
+          Write-Host ""
+          Write-Host "============================================================"
+          Write-Host "OPTIMIZING WINDOWS FOR Ghidra"
+          Write-Host "============================================================"
+
+          # --------------------------------------------------------
+          # High Performance power plan
+          # --------------------------------------------------------
+
+          Write-Host "Configuring power plan..."
 
           powercfg /setactive SCHEME_MIN
 
-          Write-Host "Power plan configured."
+          powercfg /change monitor-timeout-ac 0
+          powercfg /change standby-timeout-ac 0
+          powercfg /change hibernate-timeout-ac 0
 
+          # --------------------------------------------------------
+          # Disable visual effects
+          # --------------------------------------------------------
 
-      # ============================================================
-      # STEP 12
-      #
-      # CONTINUOUS TRUE MIRROR
-      #
-      # RDP -> Google Drive
-      #
-      # ADD    -> ADD
-      # MODIFY -> UPDATE
-      # DELETE -> DELETE
-      #
-      # NO ARTIFICIAL TOTAL TIMEOUT
-      # ============================================================
-      - name: Start continuous mirror backup
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
+          Write-Host "Reducing Windows visual effects..."
 
-          $scriptPath = "$env:RCLONE_DIR\continuous-sync.ps1"
+          New-Item `
+            -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
+            -Force | Out-Null
 
-          @'
-          $ErrorActionPreference = "Continue"
+          Set-ItemProperty `
+            -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
+            -Name "VisualFXSetting" `
+            -Type DWord `
+            -Value 2
 
-          $rclone = "C:\Rclone\rclone.exe"
-          $config = "C:\Rclone\rclone.conf"
+          # Disable transparency
 
-          $profile = "C:\Users\3NB"
-          $remoteRoot = "gdrive:RDP-V6-Persistent"
+          New-Item `
+            -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" `
+            -Force | Out-Null
 
-          $interval = 30
+          Set-ItemProperty `
+            -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" `
+            -Name "EnableTransparency" `
+            -Type DWord `
+            -Value 0
 
-          $log = "C:\Rclone\continuous-sync.log"
-          $rcloneLog = "C:\Rclone\rclone-mirror.log"
+          # --------------------------------------------------------
+          # Disable animations
+          # --------------------------------------------------------
 
-          $maps = @(
-              @{
-                  Name   = "Desktop"
-                  Local  = "$profile\Desktop"
-                  Remote = "$remoteRoot/Desktop"
-              },
-              @{
-                  Name   = "Downloads"
-                  Local  = "$profile\Downloads"
-                  Remote = "$remoteRoot/Downloads"
-              },
-              @{
-                  Name   = "Documents"
-                  Local  = "$profile\Documents"
-                  Remote = "$remoteRoot/Documents"
-              },
-              @{
-                  Name   = "Pictures"
-                  Local  = "$profile\Pictures"
-                  Remote = "$remoteRoot/Pictures"
-              },
-              @{
-                  Name   = "Videos"
-                  Local  = "$profile\Videos"
-                  Remote = "$remoteRoot/Videos"
-              },
-              @{
-                  Name   = "Music"
-                  Local  = "$profile\Music"
-                  Remote = "$remoteRoot/Music"
-              }
+          New-Item `
+            -Path "HKCU:\Control Panel\Desktop\WindowMetrics" `
+            -Force | Out-Null
+
+          Set-ItemProperty `
+            -Path "HKCU:\Control Panel\Desktop\WindowMetrics" `
+            -Name "MinAnimate" `
+            -Value "0"
+
+          # --------------------------------------------------------
+          # Disable Windows Search indexing
+          #
+          # Ghidra has its own project/indexing mechanisms.
+          # Windows Search indexing is unnecessary here.
+          # --------------------------------------------------------
+
+          Write-Host "Disabling Windows Search..."
+
+          Stop-Service `
+            -Name "WSearch" `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          Set-Service `
+            -Name "WSearch" `
+            -StartupType Disabled `
+            -ErrorAction SilentlyContinue
+
+          # --------------------------------------------------------
+          # Disable SysMain
+          #
+          # Useful mainly for normal desktop workloads.
+          # This RDP is intended for a dedicated analysis workload.
+          # --------------------------------------------------------
+
+          Write-Host "Disabling SysMain..."
+
+          Stop-Service `
+            -Name "SysMain" `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          Set-Service `
+            -Name "SysMain" `
+            -StartupType Disabled `
+            -ErrorAction SilentlyContinue
+
+          # --------------------------------------------------------
+          # Disable Print Spooler
+          # --------------------------------------------------------
+
+          Write-Host "Disabling Print Spooler..."
+
+          Stop-Service `
+            -Name "Spooler" `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          Set-Service `
+            -Name "Spooler" `
+            -StartupType Disabled `
+            -ErrorAction SilentlyContinue
+
+          # --------------------------------------------------------
+          # Disable Fax
+          # --------------------------------------------------------
+
+          Write-Host "Disabling Fax..."
+
+          Stop-Service `
+            -Name "Fax" `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          Set-Service `
+            -Name "Fax" `
+            -StartupType Disabled `
+            -ErrorAction SilentlyContinue
+
+          # --------------------------------------------------------
+          # Disable Xbox services
+          # --------------------------------------------------------
+
+          Write-Host "Disabling Xbox services..."
+
+          $xboxServices = @(
+              "XboxGipSvc",
+              "XblAuthManager",
+              "XblGameSave",
+              "XboxNetApiSvc"
           )
 
-          function Write-Log {
-              param(
-                  [string]$Message
-              )
+          foreach ($service in $xboxServices) {
 
-              $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+              Stop-Service `
+                -Name $service `
+                -Force `
+                -ErrorAction SilentlyContinue
 
-              Add-Content `
-                -Path $log `
-                -Value "[$timestamp] $Message"
+              Set-Service `
+                -Name $service `
+                -StartupType Disabled `
+                -ErrorAction SilentlyContinue
           }
 
-          Write-Log "============================================================"
-          Write-Log "CONTINUOUS MIRROR STARTED"
-          Write-Log "Source: C:\Users\3NB"
-          Write-Log "Destination: gdrive:RDP-V6-Persistent"
-          Write-Log "============================================================"
+          # --------------------------------------------------------
+          # Disable Delivery Optimization
+          #
+          # Prevents unnecessary peer/background update traffic.
+          # Windows Update itself remains enabled.
+          # --------------------------------------------------------
 
-          while ($true) {
+          Write-Host "Disabling Delivery Optimization..."
 
-              foreach ($map in $maps) {
+          Stop-Service `
+            -Name "DoSvc" `
+            -Force `
+            -ErrorAction SilentlyContinue
 
-                  $name = $map.Name
-                  $local = $map.Local
-                  $remote = $map.Remote
+          Set-Service `
+            -Name "DoSvc" `
+            -StartupType Disabled `
+            -ErrorAction SilentlyContinue
 
-                  try {
+          # --------------------------------------------------------
+          # Disable Windows Error Reporting service
+          # --------------------------------------------------------
 
-                      if (-not (Test-Path -LiteralPath $local)) {
+          Write-Host "Disabling Windows Error Reporting..."
 
-                          New-Item `
-                            -ItemType Directory `
-                            -Path $local `
-                            -Force | Out-Null
+          Stop-Service `
+            -Name "WerSvc" `
+            -Force `
+            -ErrorAction SilentlyContinue
 
-                          Write-Log "Created missing folder: $local"
-                      }
+          Set-Service `
+            -Name "WerSvc" `
+            -StartupType Disabled `
+            -ErrorAction SilentlyContinue
 
-                      Write-Log "------------------------------------------------------------"
-                      Write-Log "Starting mirror: $name"
+          # --------------------------------------------------------
+          # Disable Connected User Experiences / Telemetry
+          # --------------------------------------------------------
 
-                      $arguments = @(
-                          "--config", $config,
+          Write-Host "Reducing telemetry background activity..."
 
-                          "sync",
+          Stop-Service `
+            -Name "DiagTrack" `
+            -Force `
+            -ErrorAction SilentlyContinue
 
-                          $local,
-                          $remote,
+          Set-Service `
+            -Name "DiagTrack" `
+            -StartupType Disabled `
+            -ErrorAction SilentlyContinue
 
-                          "--transfers", "2",
-                          "--checkers", "8",
+          # --------------------------------------------------------
+          # Disable Maps Broker
+          # --------------------------------------------------------
 
-                          "--retries", "10",
-                          "--low-level-retries", "20",
-                          "--retries-sleep", "10s",
+          Write-Host "Disabling Maps Broker..."
 
-                          "--timeout", "15m",
-                          "--contimeout", "60s",
+          Stop-Service `
+            -Name "MapsBroker" `
+            -Force `
+            -ErrorAction SilentlyContinue
 
-                          "--create-empty-src-dirs",
+          Set-Service `
+            -Name "MapsBroker" `
+            -StartupType Disabled `
+            -ErrorAction SilentlyContinue
 
-                          "--drive-chunk-size", "64Mi",
+          # --------------------------------------------------------
+          # Disable downloaded maps
+          # --------------------------------------------------------
 
-                          "--stats", "30s",
+          Stop-Service `
+            -Name "lfsvc" `
+            -Force `
+            -ErrorAction SilentlyContinue
 
-                          "--log-file", $rcloneLog,
-                          "--log-level", "INFO"
-                      )
+          Set-Service `
+            -Name "lfsvc" `
+            -StartupType Disabled `
+            -ErrorAction SilentlyContinue
 
-                      #
-                      # Separate process.
-                      #
-                      $process = Start-Process `
-                        -FilePath $rclone `
-                        -ArgumentList $arguments `
-                        -WindowStyle Hidden `
-                        -PassThru
+          # --------------------------------------------------------
+          # Disable Retail Demo service
+          # --------------------------------------------------------
 
-                      Write-Log "rclone PID=$($process.Id)"
+          Stop-Service `
+            -Name "RetailDemo" `
+            -Force `
+            -ErrorAction SilentlyContinue
 
-                      #
-                      # Wait until this folder is actually finished.
-                      #
-                      # NO 30-minute kill.
-                      # NO 60-minute kill.
-                      #
-                      # A 2GB upload can therefore finish normally.
-                      #
-                      $process.WaitForExit()
+          Set-Service `
+            -Name "RetailDemo" `
+            -StartupType Disabled `
+            -ErrorAction SilentlyContinue
 
-                      $exitCode = $process.ExitCode
+          # --------------------------------------------------------
+          # Disable unnecessary Bluetooth support if present
+          #
+          # Only if the service exists.
+          # --------------------------------------------------------
 
-                      if ($exitCode -eq 0) {
+          $bluetooth = Get-Service `
+            -Name "bthserv" `
+            -ErrorAction SilentlyContinue
 
-                          Write-Log "Mirror completed: $name"
-                          Write-Log "ExitCode=0"
+          if ($bluetooth) {
 
-                      }
-                      else {
+              Write-Host "Disabling Bluetooth service..."
 
-                          Write-Log "Mirror failed: $name"
-                          Write-Log "ExitCode=$exitCode"
-                          Write-Log "Moving to next folder."
-                      }
+              Stop-Service `
+                -Name "bthserv" `
+                -Force `
+                -ErrorAction SilentlyContinue
 
-                      $process.Dispose()
-                  }
-                  catch {
-
-                      Write-Log "ERROR in $name"
-                      Write-Log $_.Exception.Message
-                      Write-Log "Moving to next folder."
-                  }
-              }
-
-              Write-Log "============================================================"
-              Write-Log "Full mirror cycle completed."
-              Write-Log "Sleeping $interval seconds."
-              Write-Log "============================================================"
-
-              Start-Sleep -Seconds $interval
+              Set-Service `
+                -Name "bthserv" `
+                -StartupType Disabled `
+                -ErrorAction SilentlyContinue
           }
 
-          '@ | Set-Content `
-            -Path $scriptPath `
-            -Encoding UTF8
+          # --------------------------------------------------------
+          # Disable unnecessary consumer features
+          # --------------------------------------------------------
 
-          #
-          # Stop an old copy of our mirror script.
-          #
-          $oldProcesses = Get-CimInstance Win32_Process `
-            -Filter "Name = 'powershell.exe'" |
-            Where-Object {
-                $_.CommandLine -and
-                $_.CommandLine -like "*C:\Rclone\continuous-sync.ps1*"
-            }
+          Write-Host "Reducing consumer background features..."
 
-          foreach ($old in $oldProcesses) {
+          New-Item `
+            -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" `
+            -Force | Out-Null
 
-              Write-Host "Stopping old mirror process PID=$($old.ProcessId)"
+          Set-ItemProperty `
+            -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" `
+            -Name "DisableWindowsConsumerFeatures" `
+            -Type DWord `
+            -Value 1
 
-              Stop-Process `
-                -Id $old.ProcessId `
+          # --------------------------------------------------------
+          # Disable background apps policy
+          # --------------------------------------------------------
+
+          New-Item `
+            -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" `
+            -Force | Out-Null
+
+          Set-ItemProperty `
+            -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" `
+            -Name "LetAppsRunInBackground" `
+            -Type DWord `
+            -Value 2
+
+          # --------------------------------------------------------
+          # Reduce RDP visual overhead
+          # --------------------------------------------------------
+
+          Write-Host "Optimizing RDP visual performance..."
+
+          New-Item `
+            -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
+            -Force | Out-Null
+
+          Set-ItemProperty `
+            -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
+            -Name "fEnableAudioCapture" `
+            -Type DWord `
+            -Value 0
+
+          Set-ItemProperty `
+            -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
+            -Name "fDisableCdm" `
+            -Type DWord `
+            -Value 1
+
+          # --------------------------------------------------------
+          # Disable hibernation
+          # --------------------------------------------------------
+
+          Write-Host "Disabling hibernation..."
+
+          powercfg /hibernate off
+
+          # --------------------------------------------------------
+          # Clear temporary files
+          # --------------------------------------------------------
+
+          Write-Host "Cleaning temporary files..."
+
+          $tempPaths = @(
+              "$env:TEMP\*",
+              "$env:WINDIR\Temp\*"
+          )
+
+          foreach ($path in $tempPaths) {
+
+              Remove-Item `
+                -Path $path `
+                -Recurse `
                 -Force `
                 -ErrorAction SilentlyContinue
           }
 
-          #
-          # Start mirror in background.
-          #
-          Start-Process `
-            -FilePath "powershell.exe" `
-            -ArgumentList @(
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy", "Bypass",
-                "-WindowStyle", "Hidden",
-                "-File", $scriptPath
-            ) `
-            -WindowStyle Hidden
+          # --------------------------------------------------------
+          # Restart Explorer so visual changes apply
+          # --------------------------------------------------------
 
-          Start-Sleep -Seconds 5
+          Write-Host "Refreshing Explorer..."
+
+          Stop-Process `
+            -Name explorer `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          Start-Sleep -Seconds 2
+
+          Start-Process explorer.exe
 
           Write-Host ""
           Write-Host "============================================================"
-          Write-Host "CONTINUOUS MIRROR IS RUNNING"
-          Write-Host "============================================================"
-          Write-Host "Add    -> Upload"
-          Write-Host "Modify -> Update"
-          Write-Host "Delete -> Delete from Drive"
-          Write-Host ""
-          Write-Host "Log:"
-          Write-Host "C:\Rclone\continuous-sync.log"
-          Write-Host ""
-          Write-Host "Rclone log:"
-          Write-Host "C:\Rclone\rclone-mirror.log"
+          Write-Host "WINDOWS OPTIMIZATION COMPLETE"
           Write-Host "============================================================"
 
 
       # ============================================================
-      # STEP 13
+      # STEP 6
+      # Ghidra-friendly environment
+      #
+      # No Google Drive.
+      # No automatic backup.
+      # No automatic restore.
+      # No continuous network synchronization.
+      # ============================================================
+      - name: Configure Ghidra environment
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host ""
+          Write-Host "============================================================"
+          Write-Host "CONFIGURING Ghidra ENVIRONMENT"
+          Write-Host "============================================================"
+
+          # Create a dedicated workspace for Ghidra.
+
+          $ghidraWorkspace = "$env:RDP_PROFILE\Ghidra"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $ghidraWorkspace `
+            -Force | Out-Null
+
+          Write-Host "Ghidra workspace:"
+          Write-Host $ghidraWorkspace
+
+          # Keep common temporary analysis data local.
+
+          $ghidraTemp = "$env:RDP_PROFILE\Ghidra\Temp"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $ghidraTemp `
+            -Force | Out-Null
+
+          Write-Host "Ghidra temp:"
+          Write-Host $ghidraTemp
+
+          Write-Host ""
+          Write-Host "No automatic backup is configured."
+          Write-Host "No Google Drive synchronization is configured."
+          Write-Host "No automatic restore is configured."
+
+          Write-Host ""
+          Write-Host "Ghidra environment ready."
+
+
+      # ============================================================
+      # STEP 7
       # Display connection information
       # ============================================================
       - name: Show RDP information
@@ -848,6 +729,10 @@ jobs:
           Write-Host $env:RDP_PROFILE
 
           Write-Host ""
+          Write-Host "Ghidra workspace:"
+          Write-Host "$env:RDP_PROFILE\Ghidra"
+
+          Write-Host ""
           Write-Host "Tailscale IPv4:"
 
           if (Test-Path $tailscale) {
@@ -855,29 +740,24 @@ jobs:
           }
 
           Write-Host ""
-          Write-Host "Persistent Drive:"
-          Write-Host $env:RCLONE_REMOTE
-
-          Write-Host ""
-          Write-Host "Mirror log:"
-          Write-Host "C:\Rclone\continuous-sync.log"
-
-          Write-Host ""
-          Write-Host "Rclone log:"
-          Write-Host "C:\Rclone\rclone-mirror.log"
-
-          Write-Host ""
           Write-Host "============================================================"
-          Write-Host "Storage behavior:"
-          Write-Host "New file      -> Google Drive"
-          Write-Host "Modified file -> Google Drive"
-          Write-Host "Deleted file  -> Google Drive"
-          Write-Host "New RDP       -> Restore latest Drive data"
+          Write-Host "STORAGE / NETWORK BEHAVIOR"
+          Write-Host "============================================================"
+          Write-Host "Google Drive              -> DISABLED"
+          Write-Host "Automatic backup          -> DISABLED"
+          Write-Host "Automatic restore         -> DISABLED"
+          Write-Host "Continuous synchronization -> DISABLED"
+          Write-Host "Background file upload    -> DISABLED"
+          Write-Host ""
+          Write-Host "Windows Defender          -> ENABLED"
+          Write-Host "Windows Update            -> ENABLED"
+          Write-Host "RDP                       -> ENABLED"
+          Write-Host "Tailscale                 -> ENABLED"
           Write-Host "============================================================"
 
 
       # ============================================================
-      # STEP 14
+      # STEP 8
       # Keep runner alive
       # ============================================================
       - name: Keep runner alive
@@ -887,7 +767,8 @@ jobs:
           Write-Host "============================================================"
           Write-Host "RDP SESSION IS ACTIVE"
           Write-Host "============================================================"
-          Write-Host "Continuous mirror is running."
+          Write-Host "Environment optimized for Ghidra."
+          Write-Host "No automatic cloud synchronization."
           Write-Host "Runner will remain alive."
           Write-Host "============================================================"
 
