@@ -1,25 +1,18 @@
-name: Windows RDP V8 - Roblox Studio + Roqer
-
+name: Windows RDP V9 - Roblox Studio + Roqer
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   rdp:
     runs-on: windows-2025
-
     timeout-minutes: 3500
-
     env:
       RDP_USER: '3NB'
       RDP_PROFILE: 'C:\Users\3NB'
       ROQER_DIR: 'C:\Users\3NB\Roqer'
       ROQER_SCRIPT: 'C:\Users\3NB\Start-Roqer.ps1'
-
     steps:
-
       # ============================================================
       # STEP 1 - Configure RDP user
       # ============================================================
@@ -29,20 +22,16 @@ jobs:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
-
           if ([string]::IsNullOrWhiteSpace($env:RDP_PASSWORD)) {
               throw "RDP_PASSWORD secret is missing."
           }
-
           $securePassword = ConvertTo-SecureString `
             $env:RDP_PASSWORD `
             -AsPlainText `
             -Force
-
           $existingUser = Get-LocalUser `
             -Name $env:RDP_USER `
             -ErrorAction SilentlyContinue
-
           if ($existingUser) {
               Set-LocalUser `
                 -Name $env:RDP_USER `
@@ -57,14 +46,11 @@ jobs:
                 -UserMayNotChangePassword `
                 -Description "GitHub Actions Roblox RDP user"
           }
-
           Add-LocalGroupMember `
             -Group "Administrators" `
             -Member $env:RDP_USER `
             -ErrorAction SilentlyContinue
-
           Write-Host "RDP user configured."
-
       # ============================================================
       # STEP 2 - Enable Remote Desktop
       # ============================================================
@@ -72,33 +58,26 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-
           Set-ItemProperty `
             -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
             -Name "fDenyTSConnections" `
             -Value 0
-
           Set-ItemProperty `
             -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
             -Name "UserAuthentication" `
             -Value 0
-
           Enable-NetFirewallRule `
             -DisplayGroup "Remote Desktop" `
             -ErrorAction SilentlyContinue
-
           Set-Service `
             -Name "TermService" `
             -StartupType Automatic
-
           Start-Service `
             -Name "TermService" `
             -ErrorAction SilentlyContinue
-
           Write-Host "Remote Desktop enabled."
-
       # ============================================================
-      # STEP 3 - Tailscale
+      # STEP 3 - Install and configure Tailscale
       # ============================================================
       - name: Install and configure Tailscale
         shell: powershell
@@ -106,46 +85,37 @@ jobs:
           TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
         run: |
           $ErrorActionPreference = "Stop"
-
           if ([string]::IsNullOrWhiteSpace($env:TS_AUTH_KEY)) {
               throw "TS_AUTH_KEY secret is missing."
           }
-
-          $installer = Join-Path $env:TEMP "tailscale-setup.exe"
-
+          $installer = Join-Path `
+            $env:TEMP `
+            "tailscale-setup.exe"
           Invoke-WebRequest `
             -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" `
             -OutFile $installer
-
           Start-Process `
             -FilePath $installer `
             -ArgumentList "/quiet" `
             -Wait
-
           $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
-
           if (-not (Test-Path $tailscale)) {
               $tailscale = "$env:ProgramFiles\Tailscale IPN\tailscale.exe"
           }
-
           if (-not (Test-Path $tailscale)) {
               throw "tailscale.exe was not found."
           }
-
           & $tailscale up `
             --auth-key $env:TS_AUTH_KEY `
-            --hostname github-rdp-v8 `
+            --hostname github-rdp-v9 `
             --accept-routes=false `
             --accept-dns=true
-
           if ($LASTEXITCODE -ne 0) {
               throw "Tailscale connection failed."
           }
-
           Write-Host ""
           Write-Host "Tailscale IPv4:"
           & $tailscale ip -4
-
       # ============================================================
       # STEP 4 - Initialize RDP profile
       # ============================================================
@@ -155,33 +125,25 @@ jobs:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
-
           $securePassword = ConvertTo-SecureString `
             $env:RDP_PASSWORD `
             -AsPlainText `
             -Force
-
           $credential = New-Object `
             System.Management.Automation.PSCredential(
               $env:RDP_USER,
               $securePassword
             )
-
           $profile = $env:RDP_PROFILE
-
           $job = Start-Job `
             -Credential $credential `
             -ScriptBlock {
-
                 param($profile)
-
                 $ErrorActionPreference = "Stop"
-
                 New-Item `
                   -ItemType Directory `
                   -Path $profile `
                   -Force | Out-Null
-
                 $folders = @(
                     "Desktop",
                     "Downloads",
@@ -189,32 +151,26 @@ jobs:
                     "Pictures",
                     "Videos",
                     "Music",
-                    "RobloxProjects"
+                    "RobloxProjects",
+                    "AppData\Local"
                 )
-
                 foreach ($folder in $folders) {
                     New-Item `
                       -ItemType Directory `
                       -Path (Join-Path $profile $folder) `
                       -Force | Out-Null
                 }
-
             } `
             -ArgumentList $profile
-
           Wait-Job $job | Out-Null
-
           $state = $job.State
-
-          Receive-Job $job -ErrorAction SilentlyContinue
+          Receive-Job $job `
+            -ErrorAction SilentlyContinue
           Remove-Job $job -Force
-
           if ($state -ne "Completed") {
               throw "Failed to initialize RDP profile."
           }
-
           Write-Host "RDP profile initialized."
-
       # ============================================================
       # STEP 5 - Windows performance optimization
       # ============================================================
@@ -222,52 +178,41 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
-
           Write-Host "Applying performance settings..."
-
-          # Maximum performance power plan
+          # Maximum performance
           powercfg /setactive SCHEME_MIN
-
-          # Never sleep while RDP is running
+          # Never sleep
           powercfg /change monitor-timeout-ac 0
           powercfg /change standby-timeout-ac 0
           powercfg /change hibernate-timeout-ac 0
           powercfg /hibernate off
-
-          # Disable unnecessary animations/transparency
+          # Reduce Windows visual overhead
           New-Item `
             -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
             -Force | Out-Null
-
           Set-ItemProperty `
             -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
             -Name "VisualFXSetting" `
             -Type DWord `
             -Value 2
-
           New-Item `
             -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" `
             -Force | Out-Null
-
           Set-ItemProperty `
             -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" `
             -Name "EnableTransparency" `
             -Type DWord `
             -Value 0
-
           New-Item `
             -Path "HKCU:\Control Panel\Desktop\WindowMetrics" `
             -Force | Out-Null
-
           Set-ItemProperty `
             -Path "HKCU:\Control Panel\Desktop\WindowMetrics" `
             -Name "MinAnimate" `
             -Value "0"
-
           # --------------------------------------------------------
-          # Disable services that are not needed for this RDP
+          # Services that are unnecessary for this RDP
           # --------------------------------------------------------
-
           $services = @(
               "WSearch",
               "SysMain",
@@ -284,116 +229,86 @@ jobs:
               "lfsvc",
               "RetailDemo"
           )
-
           foreach ($service in $services) {
-
               $svc = Get-Service `
                 -Name $service `
                 -ErrorAction SilentlyContinue
-
               if ($svc) {
-
                   Stop-Service `
                     -Name $service `
                     -Force `
                     -ErrorAction SilentlyContinue
-
                   Set-Service `
                     -Name $service `
                     -StartupType Disabled `
                     -ErrorAction SilentlyContinue
-
                   Write-Host "Disabled: $service"
               }
           }
-
-          # Bluetooth is unnecessary unless specifically used
+          # Bluetooth is unnecessary unless explicitly needed
           $bluetooth = Get-Service `
             -Name "bthserv" `
             -ErrorAction SilentlyContinue
-
           if ($bluetooth) {
-
               Stop-Service `
                 -Name "bthserv" `
                 -Force `
                 -ErrorAction SilentlyContinue
-
               Set-Service `
                 -Name "bthserv" `
                 -StartupType Disabled `
                 -ErrorAction SilentlyContinue
           }
-
-          # --------------------------------------------------------
-          # Disable unnecessary Windows consumer/background features
-          # --------------------------------------------------------
-
+          # Disable unnecessary consumer features
           New-Item `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" `
             -Force | Out-Null
-
           Set-ItemProperty `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" `
             -Name "DisableWindowsConsumerFeatures" `
             -Type DWord `
             -Value 1
-
+          # Reduce background UWP activity
           New-Item `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" `
             -Force | Out-Null
-
           Set-ItemProperty `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" `
             -Name "LetAppsRunInBackground" `
             -Type DWord `
             -Value 2
-
           # --------------------------------------------------------
-          # RDP optimization
+          # RDP optimizations
           # --------------------------------------------------------
-
           New-Item `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
             -Force | Out-Null
-
-          # Disable RDP audio capture
+          # Disable microphone/audio capture
           Set-ItemProperty `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
             -Name "fEnableAudioCapture" `
             -Type DWord `
             -Value 0
-
           # Disable RDP drive redirection
-          # This reduces unnecessary disk/network overhead.
           Set-ItemProperty `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
             -Name "fDisableCdm" `
             -Type DWord `
             -Value 1
-
           # --------------------------------------------------------
           # TEMP cleanup only
-          # NO BACKUP
-          # NO RESTORE
-          # NO CLOUD SYNC
           # --------------------------------------------------------
-
-          $tempPaths = @(
-              "$env:TEMP\*",
-              "$env:WINDIR\Temp\*"
-          )
-
-          foreach ($path in $tempPaths) {
-              Remove-Item `
-                -Path $path `
-                -Recurse `
-                -Force `
-                -ErrorAction SilentlyContinue
-          }
-
+          Remove-Item `
+            -Path "$env:TEMP\*" `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
+          Remove-Item `
+            -Path "$env:WINDIR\Temp\*" `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
           Write-Host "Windows optimization complete."
-
       # ============================================================
       # STEP 6 - Install Node.js 22 LTS
       # ============================================================
@@ -401,73 +316,70 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-
           $nodeExe = "C:\Program Files\nodejs\node.exe"
-
           if (Test-Path $nodeExe) {
               Write-Host "Node.js already installed."
               & $nodeExe --version
               exit 0
           }
-
           Write-Host "Finding latest Node.js 22.x..."
-
           $versions = Invoke-RestMethod `
             -Uri "https://nodejs.org/dist/index.json"
-
           $node = $versions |
             Where-Object {
                 $_.version -match '^v22\.'
             } |
             Select-Object -First 1
-
           if (-not $node) {
               throw "Could not find Node.js 22.x."
           }
-
           $version = $node.version
-
           $msi = "node-$version-x64.msi"
-
           $url = "https://nodejs.org/dist/$version/$msi"
-
-          $installer = Join-Path `
-            $env:TEMP `
-            $msi
-
+          $installer = Join-Path $env:TEMP $msi
           Write-Host "Downloading $version..."
-
           Invoke-WebRequest `
             -Uri $url `
             -OutFile $installer
-
           Write-Host "Installing Node.js..."
-
           $process = Start-Process `
             -FilePath "msiexec.exe" `
             -ArgumentList "/i `"$installer`" /qn /norestart" `
             -Wait `
             -PassThru
-
           if ($process.ExitCode -ne 0) {
               throw "Node.js installation failed: $($process.ExitCode)"
           }
-
-          $env:PATH = "C:\Program Files\nodejs;$env:PATH"
-
-          & "C:\Program Files\nodejs\node.exe" --version
+          & $nodeExe --version
           & "C:\Program Files\nodejs\npm.cmd" --version
-
       # ============================================================
-      # STEP 7 - Install Roblox Studio
+      # STEP 7 - npm cache
       # ============================================================
-      - name: Install Roblox Studio
+      - name: Configure npm cache
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $npmCache = "C:\npm-cache"
+          New-Item `
+            -ItemType Directory `
+            -Path $npmCache `
+            -Force | Out-Null
+          & "C:\Program Files\nodejs\npm.cmd" `
+            config set cache $npmCache `
+            --global
+          & "C:\Program Files\nodejs\npm.cmd" `
+            config set prefer-offline true `
+            --global
+          Write-Host "npm cache configured:"
+          & "C:\Program Files\nodejs\npm.cmd" config get cache
+      # ============================================================
+      # STEP 8 - Install Roblox Studio
+      # ============================================================
+      - name: Prepare Roblox Studio
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
-
           $versionsPath = "$env:RDP_PROFILE\AppData\Local\Roblox\Versions"
-
           $studio = Get-ChildItem `
             -Path $versionsPath `
             -Filter "RobloxStudioBeta.exe" `
@@ -475,126 +387,84 @@ jobs:
             -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
-
           if ($studio) {
-              Write-Host "Roblox Studio already installed:"
+              Write-Host "Roblox Studio already exists:"
               Write-Host $studio.FullName
-              exit 0
           }
-
-          Write-Host "Roblox Studio was not found."
-
-          Write-Host ""
-          Write-Host "Roblox Studio must be installed under the RDP user's profile."
-          Write-Host "The official Studio installer requires an interactive user installation."
-          Write-Host "Opening the official installer URL is safer than using an undocumented"
-          Write-Host "silent installation switch."
-
-          $installer = "$env:TEMP\RobloxStudio.exe"
-
-          Invoke-WebRequest `
-            -Uri "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
-            -OutFile $installer
-
-          Write-Host "Roblox Studio installer downloaded."
-
-          # Run installer as the RDP user.
-          $securePassword = ConvertTo-SecureString `
-            "${{ secrets.RDP_PASSWORD }}" `
-            -AsPlainText `
-            -Force
-
-          $credential = New-Object `
-            System.Management.Automation.PSCredential(
-              $env:RDP_USER,
-              $securePassword
-            )
-
-          Start-Process `
-            -FilePath $installer `
-            -Credential $credential `
-            -WorkingDirectory $env:RDP_PROFILE
-
-          Write-Host "Roblox Studio installer started for $env:RDP_USER."
-          Write-Host "If Studio is not installed yet, complete its first-run setup after RDP login."
-
+          else {
+              Write-Host "Roblox Studio is not installed yet."
+              Write-Host "It will be installed for the RDP user."
+              $installer = "$env:TEMP\RobloxStudioLauncherBeta.exe"
+              Invoke-WebRequest `
+                -Uri "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
+                -OutFile $installer
+              $securePassword = ConvertTo-SecureString `
+                "${{ secrets.RDP_PASSWORD }}" `
+                -AsPlainText `
+                -Force
+              $credential = New-Object `
+                System.Management.Automation.PSCredential(
+                  $env:RDP_USER,
+                  $securePassword
+                )
+              Start-Process `
+                -FilePath $installer `
+                -Credential $credential `
+                -WorkingDirectory $env:RDP_PROFILE
+              Write-Host "Roblox Studio installer launched."
+          }
       # ============================================================
-      # STEP 8 - Download and build Roqer
+      # STEP 9 - Clone and build Roqer
       # ============================================================
       - name: Install and build Roqer
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-
           $roqer = $env:ROQER_DIR
-
           if (Test-Path $roqer) {
-
               Write-Host "Roqer directory already exists."
-
               Set-Location $roqer
-
               git fetch --depth=1 origin
               git reset --hard origin/main
-
           }
           else {
-
               Write-Host "Cloning Roqer..."
-
               git clone `
                 --depth 1 `
                 "https://github.com/S4US/Roqer.git" `
                 $roqer
-
               Set-Location $roqer
           }
-
           Write-Host "Installing Roqer dependencies..."
-
-          & "C:\Program Files\nodejs\npm.cmd" install
-
+          & "C:\Program Files\nodejs\npm.cmd" install `
+            --prefer-offline `
+            --no-audit `
+            --no-fund
           if ($LASTEXITCODE -ne 0) {
               throw "Roqer npm install failed."
           }
-
           Write-Host "Building Roqer..."
-
           & "C:\Program Files\nodejs\npm.cmd" run build:all
-
           if ($LASTEXITCODE -ne 0) {
               throw "Roqer build failed."
           }
-
           Write-Host "Roqer build completed."
-
       # ============================================================
-      # STEP 9 - Create low-priority Roqer launcher
+      # STEP 10 - Create Roqer launcher
       # ============================================================
       - name: Create Roqer launcher
         shell: powershell
-        env:
-          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
-
           $script = @'
           $ErrorActionPreference = "Continue"
-
           $RoqerDir = "C:\Users\3NB\Roqer"
-          $Node = "C:\Program Files\nodejs\node.exe"
           $Npm = "C:\Program Files\nodejs\npm.cmd"
-
-          # --------------------------------------------------------
-          # Wait for Windows desktop
-          # --------------------------------------------------------
-
+          # Wait for the interactive desktop
           Start-Sleep -Seconds 8
-
           # --------------------------------------------------------
           # Start Roblox Studio if installed
           # --------------------------------------------------------
-
           $studio = Get-ChildItem `
             -Path "$env:LOCALAPPDATA\Roblox\Versions" `
             -Filter "RobloxStudioBeta.exe" `
@@ -602,120 +472,67 @@ jobs:
             -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
-
           if ($studio) {
-
               $existingStudio = Get-Process `
                 -Name "RobloxStudioBeta" `
                 -ErrorAction SilentlyContinue
-
               if (-not $existingStudio) {
-
                   Write-Host "Starting Roblox Studio..."
-
                   Start-Process `
                     -FilePath $studio.FullName `
                     -WorkingDirectory $studio.DirectoryName
               }
           }
-
-          # --------------------------------------------------------
-          # Wait a little for Studio
-          # --------------------------------------------------------
-
+          # Give Studio time to initialize
           Start-Sleep -Seconds 10
-
           # --------------------------------------------------------
           # Start Roqer
           # --------------------------------------------------------
-
           if (-not (Test-Path $RoqerDir)) {
               Write-Host "Roqer directory not found."
               exit 1
           }
-
           Set-Location $RoqerDir
-
           Write-Host "Starting Roqer..."
-
-          $process = Start-Process `
+          Start-Process `
             -FilePath $Npm `
             -ArgumentList "run start:desktop" `
-            -WorkingDirectory $RoqerDir `
-            -PassThru
-
+            -WorkingDirectory $RoqerDir
+          Start-Sleep -Seconds 10
           # --------------------------------------------------------
-          # Keep Roqer BELOW Roblox Studio priority
+          # Priority management
           # --------------------------------------------------------
-
-          Start-Sleep -Seconds 8
-
-          $roqerNames = @(
-              "Roqer",
-              "electron",
-              "node"
-          )
-
-          foreach ($name in $roqerNames) {
-
-              Get-Process `
-                -Name $name `
-                -ErrorAction SilentlyContinue |
-                ForEach-Object {
-
-                    try {
-                        $_.PriorityClass = "BelowNormal"
-                    }
-                    catch {
-                    }
-                }
-          }
-
-          # --------------------------------------------------------
-          # Monitor priority without consuming CPU
-          # --------------------------------------------------------
-
           while ($true) {
-
-              # Roblox Studio gets AboveNormal priority.
+              # Roblox Studio gets priority.
               Get-Process `
                 -Name "RobloxStudioBeta" `
                 -ErrorAction SilentlyContinue |
                 ForEach-Object {
-
                     try {
                         $_.PriorityClass = "AboveNormal"
                     }
-                    catch {
-                    }
+                    catch {}
                 }
-
               # Roqer stays below Studio.
               Get-Process `
                 -Name "Roqer" `
                 -ErrorAction SilentlyContinue |
                 ForEach-Object {
-
                     try {
                         $_.PriorityClass = "BelowNormal"
                     }
-                    catch {
-                    }
+                    catch {}
                 }
-
               Start-Sleep -Seconds 30
           }
           '@
-
           Set-Content `
             -Path $env:ROQER_SCRIPT `
             -Value $script `
             -Encoding UTF8
-
           Write-Host "Roqer launcher created."
-
       # ============================================================
-      # STEP 10 - Auto-start Roqer when user logs into RDP
+      # STEP 11 - Create auto-start task
       # ============================================================
       - name: Configure Roqer auto start
         shell: powershell
@@ -723,157 +540,124 @@ jobs:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
-
           $taskName = "Roqer Roblox Agent"
-
+          Write-Host "Configuring Roqer auto-start..."
           Unregister-ScheduledTask `
             -TaskName $taskName `
             -Confirm:$false `
             -ErrorAction SilentlyContinue
-
           $action = New-ScheduledTaskAction `
             -Execute "powershell.exe" `
             -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$env:ROQER_SCRIPT`""
-
           $trigger = New-ScheduledTaskTrigger `
             -AtLogOn `
             -User $env:RDP_USER
-
-          $principal = New-ScheduledTaskPrincipal `
-            -UserId $env:RDP_USER `
-            -LogonType Password `
-            -RunLevel Highest
-
           $settings = New-ScheduledTaskSettingsSet `
             -AllowStartIfOnBatteries `
             -DontStopIfGoingOnBatteries `
             -ExecutionTimeLimit ([TimeSpan]::Zero) `
             -StartWhenAvailable
-
           Register-ScheduledTask `
             -TaskName $taskName `
             -Action $action `
             -Trigger $trigger `
-            -Principal $principal `
             -Settings $settings `
             -User $env:RDP_USER `
             -Password $env:RDP_PASSWORD `
             -Force | Out-Null
-
-          Write-Host "Roqer will auto-start when $env:RDP_USER logs in."
-
+          Write-Host ""
+          Write-Host "Roqer auto-start task created successfully."
+          Write-Host "User: $env:RDP_USER"
+          Write-Host "Trigger: At logon"
+          Write-Host "Task: $taskName"
       # ============================================================
-      # STEP 11 - No persistence / no cloud sync
+      # STEP 12 - Persistence / sync status
       # ============================================================
       - name: Disable persistence and synchronization
         shell: powershell
         run: |
-          $ErrorActionPreference = "Continue"
-
           Write-Host "============================================"
           Write-Host "PERSISTENCE / SYNC STATUS"
           Write-Host "============================================"
-
-          Write-Host "Google Drive             -> DISABLED"
-          Write-Host "Automatic backup         -> DISABLED"
-          Write-Host "Automatic restore        -> DISABLED"
-          Write-Host "Continuous sync          -> DISABLED"
-          Write-Host "Background upload       -> DISABLED"
-          Write-Host "Rclone                   -> NOT INSTALLED"
-          Write-Host "Windows Defender         -> ENABLED"
-          Write-Host "Windows Update           -> ENABLED"
-          Write-Host "Remote Desktop           -> ENABLED"
-          Write-Host "Tailscale                -> ENABLED"
-
+          Write-Host "Google Drive       -> DISABLED"
+          Write-Host "Automatic backup   -> DISABLED"
+          Write-Host "Automatic restore  -> DISABLED"
+          Write-Host "Continuous sync    -> DISABLED"
+          Write-Host "Background upload -> DISABLED"
+          Write-Host "Rclone             -> NOT INSTALLED"
+          Write-Host ""
+          Write-Host "Windows Defender   -> ENABLED"
+          Write-Host "Windows Update     -> ENABLED"
+          Write-Host "RDP                -> ENABLED"
+          Write-Host "Tailscale          -> ENABLED"
       # ============================================================
-      # STEP 12 - Final status
+      # STEP 13 - Final information
       # ============================================================
       - name: Show RDP information
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
-
           $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
-
           if (-not (Test-Path $tailscale)) {
               $tailscale = "$env:ProgramFiles\Tailscale IPN\tailscale.exe"
           }
-
           Write-Host ""
           Write-Host "============================================================"
-          Write-Host "                 ROBLOX RDP V8 READY"
+          Write-Host "             ROBLOX RDP V9 READY"
           Write-Host "============================================================"
           Write-Host ""
-
           Write-Host "Username:"
           Write-Host $env:RDP_USER
-
           Write-Host ""
           Write-Host "Profile:"
           Write-Host $env:RDP_PROFILE
-
           Write-Host ""
           Write-Host "Roqer:"
           Write-Host $env:ROQER_DIR
-
           Write-Host ""
           Write-Host "Tailscale IPv4:"
-
           if (Test-Path $tailscale) {
               & $tailscale ip -4
           }
-
           Write-Host ""
           Write-Host "Roblox Studio          -> ENABLED"
           Write-Host "Roqer                  -> ENABLED"
           Write-Host "Roqer priority         -> BELOW NORMAL"
           Write-Host "Roblox Studio priority -> ABOVE NORMAL"
-          Write-Host "Full Auto              -> AVAILABLE"
+          Write-Host "npm cache              -> ENABLED"
           Write-Host "Google Drive           -> DISABLED"
           Write-Host "Backup                 -> DISABLED"
           Write-Host "Restore                -> DISABLED"
           Write-Host "Continuous sync        -> DISABLED"
-          Write-Host "Windows Defender       -> ENABLED"
-          Write-Host "Windows Update         -> ENABLED"
           Write-Host ""
-
-          Write-Host "============================================================"
-
       # ============================================================
-      # STEP 13 - Keep runner alive
+      # STEP 14 - Keep runner alive
       # ============================================================
       - name: Keep runner alive
         shell: powershell
         run: |
           Write-Host "RDP SESSION IS ACTIVE"
           Write-Host "Roblox Studio + Roqer environment is running."
-
           while ($true) {
-
               $studio = Get-Process `
                 -Name "RobloxStudioBeta" `
                 -ErrorAction SilentlyContinue
-
               $roqer = Get-Process `
                 -Name "Roqer" `
                 -ErrorAction SilentlyContinue
-
               Write-Host ""
               Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Runner alive."
-
               if ($studio) {
                   Write-Host "Roblox Studio: RUNNING"
               }
               else {
                   Write-Host "Roblox Studio: NOT RUNNING"
               }
-
               if ($roqer) {
                   Write-Host "Roqer: RUNNING"
               }
               else {
                   Write-Host "Roqer: NOT RUNNING"
               }
-
               Start-Sleep -Seconds 400
           }
