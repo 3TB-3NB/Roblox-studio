@@ -1,4 +1,4 @@
-name: Windows RDP V6
+name: Windows RDP V8 - Roblox Studio + Roqer
 
 on:
   workflow_dispatch:
@@ -15,12 +15,13 @@ jobs:
     env:
       RDP_USER: '3NB'
       RDP_PROFILE: 'C:\Users\3NB'
+      ROQER_DIR: 'C:\Users\3NB\Roqer'
+      ROQER_SCRIPT: 'C:\Users\3NB\Start-Roqer.ps1'
 
     steps:
 
       # ============================================================
-      # STEP 1
-      # Configure RDP user
+      # STEP 1 - Configure RDP user
       # ============================================================
       - name: Configure RDP user
         shell: powershell
@@ -43,24 +44,18 @@ jobs:
             -ErrorAction SilentlyContinue
 
           if ($existingUser) {
-
-              Write-Host "RDP user already exists."
-
               Set-LocalUser `
                 -Name $env:RDP_USER `
                 -Password $securePassword
           }
           else {
-
-              Write-Host "Creating RDP user..."
-
               New-LocalUser `
                 -Name $env:RDP_USER `
                 -Password $securePassword `
                 -AccountNeverExpires `
                 -PasswordNeverExpires `
                 -UserMayNotChangePassword `
-                -Description "GitHub Actions RDP user"
+                -Description "GitHub Actions Roblox RDP user"
           }
 
           Add-LocalGroupMember `
@@ -70,17 +65,13 @@ jobs:
 
           Write-Host "RDP user configured."
 
-
       # ============================================================
-      # STEP 2
-      # Enable Remote Desktop
+      # STEP 2 - Enable Remote Desktop
       # ============================================================
       - name: Enable Remote Desktop
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-
-          Write-Host "Enabling Remote Desktop..."
 
           Set-ItemProperty `
             -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
@@ -106,10 +97,8 @@ jobs:
 
           Write-Host "Remote Desktop enabled."
 
-
       # ============================================================
-      # STEP 3
-      # Install and configure Tailscale
+      # STEP 3 - Tailscale
       # ============================================================
       - name: Install and configure Tailscale
         shell: powershell
@@ -122,17 +111,11 @@ jobs:
               throw "TS_AUTH_KEY secret is missing."
           }
 
-          $installer = Join-Path `
-            $env:TEMP `
-            "tailscale-setup.exe"
-
-          Write-Host "Downloading Tailscale..."
+          $installer = Join-Path $env:TEMP "tailscale-setup.exe"
 
           Invoke-WebRequest `
             -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" `
             -OutFile $installer
-
-          Write-Host "Installing Tailscale..."
 
           Start-Process `
             -FilePath $installer `
@@ -149,11 +132,9 @@ jobs:
               throw "tailscale.exe was not found."
           }
 
-          Write-Host "Connecting Tailscale..."
-
           & $tailscale up `
             --auth-key $env:TS_AUTH_KEY `
-            --hostname github-rdp-v6 `
+            --hostname github-rdp-v8 `
             --accept-routes=false `
             --accept-dns=true
 
@@ -165,10 +146,8 @@ jobs:
           Write-Host "Tailscale IPv4:"
           & $tailscale ip -4
 
-
       # ============================================================
-      # STEP 4
-      # Initialize RDP profile
+      # STEP 4 - Initialize RDP profile
       # ============================================================
       - name: Initialize RDP profile
         shell: powershell
@@ -190,8 +169,6 @@ jobs:
 
           $profile = $env:RDP_PROFILE
 
-          Write-Host "Initializing RDP profile..."
-
           $job = Start-Job `
             -Credential $credential `
             -ScriptBlock {
@@ -211,18 +188,14 @@ jobs:
                     "Documents",
                     "Pictures",
                     "Videos",
-                    "Music"
+                    "Music",
+                    "RobloxProjects"
                 )
 
                 foreach ($folder in $folders) {
-
-                    $path = Join-Path `
-                      $profile `
-                      $folder
-
                     New-Item `
                       -ItemType Directory `
-                      -Path $path `
+                      -Path (Join-Path $profile $folder) `
                       -Force | Out-Null
                 }
 
@@ -233,69 +206,35 @@ jobs:
 
           $state = $job.State
 
-          Receive-Job `
-            $job `
-            -ErrorAction SilentlyContinue
-
-          Remove-Job `
-            $job `
-            -Force
+          Receive-Job $job -ErrorAction SilentlyContinue
+          Remove-Job $job -Force
 
           if ($state -ne "Completed") {
-              throw "Failed to initialize RDP profile. Job state: $state"
-          }
-
-          if (-not (Test-Path $profile)) {
-              throw "RDP profile was not created."
+              throw "Failed to initialize RDP profile."
           }
 
           Write-Host "RDP profile initialized."
 
-
       # ============================================================
-      # STEP 5
-      # PERFORMANCE OPTIMIZATION
-      #
-      # Target:
-      # Ghidra + RDP
-      #
-      # We intentionally DO NOT disable:
-      # - Windows Defender
-      # - Windows Update
-      # - Networking
-      # - RDP
-      # - Tailscale
-      # - RPC
-      # - Java dependencies
+      # STEP 5 - Windows performance optimization
       # ============================================================
-      - name: Optimize Windows for Ghidra
+      - name: Optimize Windows for Roblox Studio
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
 
-          Write-Host ""
-          Write-Host "============================================================"
-          Write-Host "OPTIMIZING WINDOWS FOR Ghidra"
-          Write-Host "============================================================"
+          Write-Host "Applying performance settings..."
 
-          # --------------------------------------------------------
-          # High Performance power plan
-          # --------------------------------------------------------
-
-          Write-Host "Configuring power plan..."
-
+          # Maximum performance power plan
           powercfg /setactive SCHEME_MIN
 
+          # Never sleep while RDP is running
           powercfg /change monitor-timeout-ac 0
           powercfg /change standby-timeout-ac 0
           powercfg /change hibernate-timeout-ac 0
+          powercfg /hibernate off
 
-          # --------------------------------------------------------
-          # Disable visual effects
-          # --------------------------------------------------------
-
-          Write-Host "Reducing Windows visual effects..."
-
+          # Disable unnecessary animations/transparency
           New-Item `
             -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" `
             -Force | Out-Null
@@ -305,8 +244,6 @@ jobs:
             -Name "VisualFXSetting" `
             -Type DWord `
             -Value 2
-
-          # Disable transparency
 
           New-Item `
             -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" `
@@ -318,10 +255,6 @@ jobs:
             -Type DWord `
             -Value 0
 
-          # --------------------------------------------------------
-          # Disable animations
-          # --------------------------------------------------------
-
           New-Item `
             -Path "HKCU:\Control Panel\Desktop\WindowMetrics" `
             -Force | Out-Null
@@ -332,210 +265,55 @@ jobs:
             -Value "0"
 
           # --------------------------------------------------------
-          # Disable Windows Search indexing
-          #
-          # Ghidra has its own project/indexing mechanisms.
-          # Windows Search indexing is unnecessary here.
+          # Disable services that are not needed for this RDP
           # --------------------------------------------------------
 
-          Write-Host "Disabling Windows Search..."
-
-          Stop-Service `
-            -Name "WSearch" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Set-Service `
-            -Name "WSearch" `
-            -StartupType Disabled `
-            -ErrorAction SilentlyContinue
-
-          # --------------------------------------------------------
-          # Disable SysMain
-          #
-          # Useful mainly for normal desktop workloads.
-          # This RDP is intended for a dedicated analysis workload.
-          # --------------------------------------------------------
-
-          Write-Host "Disabling SysMain..."
-
-          Stop-Service `
-            -Name "SysMain" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Set-Service `
-            -Name "SysMain" `
-            -StartupType Disabled `
-            -ErrorAction SilentlyContinue
-
-          # --------------------------------------------------------
-          # Disable Print Spooler
-          # --------------------------------------------------------
-
-          Write-Host "Disabling Print Spooler..."
-
-          Stop-Service `
-            -Name "Spooler" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Set-Service `
-            -Name "Spooler" `
-            -StartupType Disabled `
-            -ErrorAction SilentlyContinue
-
-          # --------------------------------------------------------
-          # Disable Fax
-          # --------------------------------------------------------
-
-          Write-Host "Disabling Fax..."
-
-          Stop-Service `
-            -Name "Fax" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Set-Service `
-            -Name "Fax" `
-            -StartupType Disabled `
-            -ErrorAction SilentlyContinue
-
-          # --------------------------------------------------------
-          # Disable Xbox services
-          # --------------------------------------------------------
-
-          Write-Host "Disabling Xbox services..."
-
-          $xboxServices = @(
+          $services = @(
+              "WSearch",
+              "SysMain",
+              "Spooler",
+              "Fax",
               "XboxGipSvc",
               "XblAuthManager",
               "XblGameSave",
-              "XboxNetApiSvc"
+              "XboxNetApiSvc",
+              "DoSvc",
+              "WerSvc",
+              "DiagTrack",
+              "MapsBroker",
+              "lfsvc",
+              "RetailDemo"
           )
 
-          foreach ($service in $xboxServices) {
+          foreach ($service in $services) {
 
-              Stop-Service `
+              $svc = Get-Service `
                 -Name $service `
-                -Force `
                 -ErrorAction SilentlyContinue
 
-              Set-Service `
-                -Name $service `
-                -StartupType Disabled `
-                -ErrorAction SilentlyContinue
+              if ($svc) {
+
+                  Stop-Service `
+                    -Name $service `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+
+                  Set-Service `
+                    -Name $service `
+                    -StartupType Disabled `
+                    -ErrorAction SilentlyContinue
+
+                  Write-Host "Disabled: $service"
+              }
           }
 
-          # --------------------------------------------------------
-          # Disable Delivery Optimization
-          #
-          # Prevents unnecessary peer/background update traffic.
-          # Windows Update itself remains enabled.
-          # --------------------------------------------------------
-
-          Write-Host "Disabling Delivery Optimization..."
-
-          Stop-Service `
-            -Name "DoSvc" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Set-Service `
-            -Name "DoSvc" `
-            -StartupType Disabled `
-            -ErrorAction SilentlyContinue
-
-          # --------------------------------------------------------
-          # Disable Windows Error Reporting service
-          # --------------------------------------------------------
-
-          Write-Host "Disabling Windows Error Reporting..."
-
-          Stop-Service `
-            -Name "WerSvc" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Set-Service `
-            -Name "WerSvc" `
-            -StartupType Disabled `
-            -ErrorAction SilentlyContinue
-
-          # --------------------------------------------------------
-          # Disable Connected User Experiences / Telemetry
-          # --------------------------------------------------------
-
-          Write-Host "Reducing telemetry background activity..."
-
-          Stop-Service `
-            -Name "DiagTrack" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Set-Service `
-            -Name "DiagTrack" `
-            -StartupType Disabled `
-            -ErrorAction SilentlyContinue
-
-          # --------------------------------------------------------
-          # Disable Maps Broker
-          # --------------------------------------------------------
-
-          Write-Host "Disabling Maps Broker..."
-
-          Stop-Service `
-            -Name "MapsBroker" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Set-Service `
-            -Name "MapsBroker" `
-            -StartupType Disabled `
-            -ErrorAction SilentlyContinue
-
-          # --------------------------------------------------------
-          # Disable downloaded maps
-          # --------------------------------------------------------
-
-          Stop-Service `
-            -Name "lfsvc" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Set-Service `
-            -Name "lfsvc" `
-            -StartupType Disabled `
-            -ErrorAction SilentlyContinue
-
-          # --------------------------------------------------------
-          # Disable Retail Demo service
-          # --------------------------------------------------------
-
-          Stop-Service `
-            -Name "RetailDemo" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Set-Service `
-            -Name "RetailDemo" `
-            -StartupType Disabled `
-            -ErrorAction SilentlyContinue
-
-          # --------------------------------------------------------
-          # Disable unnecessary Bluetooth support if present
-          #
-          # Only if the service exists.
-          # --------------------------------------------------------
-
+          # Bluetooth is unnecessary unless specifically used
           $bluetooth = Get-Service `
             -Name "bthserv" `
             -ErrorAction SilentlyContinue
 
           if ($bluetooth) {
 
-              Write-Host "Disabling Bluetooth service..."
-
               Stop-Service `
                 -Name "bthserv" `
                 -Force `
@@ -548,10 +326,8 @@ jobs:
           }
 
           # --------------------------------------------------------
-          # Disable unnecessary consumer features
+          # Disable unnecessary Windows consumer/background features
           # --------------------------------------------------------
-
-          Write-Host "Reducing consumer background features..."
 
           New-Item `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" `
@@ -562,10 +338,6 @@ jobs:
             -Name "DisableWindowsConsumerFeatures" `
             -Type DWord `
             -Value 1
-
-          # --------------------------------------------------------
-          # Disable background apps policy
-          # --------------------------------------------------------
 
           New-Item `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" `
@@ -578,21 +350,22 @@ jobs:
             -Value 2
 
           # --------------------------------------------------------
-          # Reduce RDP visual overhead
+          # RDP optimization
           # --------------------------------------------------------
-
-          Write-Host "Optimizing RDP visual performance..."
 
           New-Item `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
             -Force | Out-Null
 
+          # Disable RDP audio capture
           Set-ItemProperty `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
             -Name "fEnableAudioCapture" `
             -Type DWord `
             -Value 0
 
+          # Disable RDP drive redirection
+          # This reduces unnecessary disk/network overhead.
           Set-ItemProperty `
             -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" `
             -Name "fDisableCdm" `
@@ -600,18 +373,11 @@ jobs:
             -Value 1
 
           # --------------------------------------------------------
-          # Disable hibernation
+          # TEMP cleanup only
+          # NO BACKUP
+          # NO RESTORE
+          # NO CLOUD SYNC
           # --------------------------------------------------------
-
-          Write-Host "Disabling hibernation..."
-
-          powercfg /hibernate off
-
-          # --------------------------------------------------------
-          # Clear temporary files
-          # --------------------------------------------------------
-
-          Write-Host "Cleaning temporary files..."
 
           $tempPaths = @(
               "$env:TEMP\*",
@@ -619,7 +385,6 @@ jobs:
           )
 
           foreach ($path in $tempPaths) {
-
               Remove-Item `
                 -Path $path `
                 -Recurse `
@@ -627,82 +392,401 @@ jobs:
                 -ErrorAction SilentlyContinue
           }
 
-          # --------------------------------------------------------
-          # Restart Explorer so visual changes apply
-          # --------------------------------------------------------
-
-          Write-Host "Refreshing Explorer..."
-
-          Stop-Process `
-            -Name explorer `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Start-Sleep -Seconds 2
-
-          Start-Process explorer.exe
-
-          Write-Host ""
-          Write-Host "============================================================"
-          Write-Host "WINDOWS OPTIMIZATION COMPLETE"
-          Write-Host "============================================================"
-
+          Write-Host "Windows optimization complete."
 
       # ============================================================
-      # STEP 6
-      # Ghidra-friendly environment
-      #
-      # No Google Drive.
-      # No automatic backup.
-      # No automatic restore.
-      # No continuous network synchronization.
+      # STEP 6 - Install Node.js 22 LTS
       # ============================================================
-      - name: Configure Ghidra environment
+      - name: Install Node.js
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $nodeExe = "C:\Program Files\nodejs\node.exe"
+
+          if (Test-Path $nodeExe) {
+              Write-Host "Node.js already installed."
+              & $nodeExe --version
+              exit 0
+          }
+
+          Write-Host "Finding latest Node.js 22.x..."
+
+          $versions = Invoke-RestMethod `
+            -Uri "https://nodejs.org/dist/index.json"
+
+          $node = $versions |
+            Where-Object {
+                $_.version -match '^v22\.'
+            } |
+            Select-Object -First 1
+
+          if (-not $node) {
+              throw "Could not find Node.js 22.x."
+          }
+
+          $version = $node.version
+
+          $msi = "node-$version-x64.msi"
+
+          $url = "https://nodejs.org/dist/$version/$msi"
+
+          $installer = Join-Path `
+            $env:TEMP `
+            $msi
+
+          Write-Host "Downloading $version..."
+
+          Invoke-WebRequest `
+            -Uri $url `
+            -OutFile $installer
+
+          Write-Host "Installing Node.js..."
+
+          $process = Start-Process `
+            -FilePath "msiexec.exe" `
+            -ArgumentList "/i `"$installer`" /qn /norestart" `
+            -Wait `
+            -PassThru
+
+          if ($process.ExitCode -ne 0) {
+              throw "Node.js installation failed: $($process.ExitCode)"
+          }
+
+          $env:PATH = "C:\Program Files\nodejs;$env:PATH"
+
+          & "C:\Program Files\nodejs\node.exe" --version
+          & "C:\Program Files\nodejs\npm.cmd" --version
+
+      # ============================================================
+      # STEP 7 - Install Roblox Studio
+      # ============================================================
+      - name: Install Roblox Studio
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
 
-          Write-Host ""
-          Write-Host "============================================================"
-          Write-Host "CONFIGURING Ghidra ENVIRONMENT"
-          Write-Host "============================================================"
+          $versionsPath = "$env:RDP_PROFILE\AppData\Local\Roblox\Versions"
 
-          # Create a dedicated workspace for Ghidra.
+          $studio = Get-ChildItem `
+            -Path $versionsPath `
+            -Filter "RobloxStudioBeta.exe" `
+            -Recurse `
+            -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
 
-          $ghidraWorkspace = "$env:RDP_PROFILE\Ghidra"
+          if ($studio) {
+              Write-Host "Roblox Studio already installed:"
+              Write-Host $studio.FullName
+              exit 0
+          }
 
-          New-Item `
-            -ItemType Directory `
-            -Path $ghidraWorkspace `
-            -Force | Out-Null
-
-          Write-Host "Ghidra workspace:"
-          Write-Host $ghidraWorkspace
-
-          # Keep common temporary analysis data local.
-
-          $ghidraTemp = "$env:RDP_PROFILE\Ghidra\Temp"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $ghidraTemp `
-            -Force | Out-Null
-
-          Write-Host "Ghidra temp:"
-          Write-Host $ghidraTemp
+          Write-Host "Roblox Studio was not found."
 
           Write-Host ""
-          Write-Host "No automatic backup is configured."
-          Write-Host "No Google Drive synchronization is configured."
-          Write-Host "No automatic restore is configured."
+          Write-Host "Roblox Studio must be installed under the RDP user's profile."
+          Write-Host "The official Studio installer requires an interactive user installation."
+          Write-Host "Opening the official installer URL is safer than using an undocumented"
+          Write-Host "silent installation switch."
 
-          Write-Host ""
-          Write-Host "Ghidra environment ready."
+          $installer = "$env:TEMP\RobloxStudio.exe"
 
+          Invoke-WebRequest `
+            -Uri "https://setup.rbxcdn.com/RobloxStudioLauncherBeta.exe" `
+            -OutFile $installer
+
+          Write-Host "Roblox Studio installer downloaded."
+
+          # Run installer as the RDP user.
+          $securePassword = ConvertTo-SecureString `
+            "${{ secrets.RDP_PASSWORD }}" `
+            -AsPlainText `
+            -Force
+
+          $credential = New-Object `
+            System.Management.Automation.PSCredential(
+              $env:RDP_USER,
+              $securePassword
+            )
+
+          Start-Process `
+            -FilePath $installer `
+            -Credential $credential `
+            -WorkingDirectory $env:RDP_PROFILE
+
+          Write-Host "Roblox Studio installer started for $env:RDP_USER."
+          Write-Host "If Studio is not installed yet, complete its first-run setup after RDP login."
 
       # ============================================================
-      # STEP 7
-      # Display connection information
+      # STEP 8 - Download and build Roqer
+      # ============================================================
+      - name: Install and build Roqer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $roqer = $env:ROQER_DIR
+
+          if (Test-Path $roqer) {
+
+              Write-Host "Roqer directory already exists."
+
+              Set-Location $roqer
+
+              git fetch --depth=1 origin
+              git reset --hard origin/main
+
+          }
+          else {
+
+              Write-Host "Cloning Roqer..."
+
+              git clone `
+                --depth 1 `
+                "https://github.com/S4US/Roqer.git" `
+                $roqer
+
+              Set-Location $roqer
+          }
+
+          Write-Host "Installing Roqer dependencies..."
+
+          & "C:\Program Files\nodejs\npm.cmd" install
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Roqer npm install failed."
+          }
+
+          Write-Host "Building Roqer..."
+
+          & "C:\Program Files\nodejs\npm.cmd" run build:all
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "Roqer build failed."
+          }
+
+          Write-Host "Roqer build completed."
+
+      # ============================================================
+      # STEP 9 - Create low-priority Roqer launcher
+      # ============================================================
+      - name: Create Roqer launcher
+        shell: powershell
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $script = @'
+          $ErrorActionPreference = "Continue"
+
+          $RoqerDir = "C:\Users\3NB\Roqer"
+          $Node = "C:\Program Files\nodejs\node.exe"
+          $Npm = "C:\Program Files\nodejs\npm.cmd"
+
+          # --------------------------------------------------------
+          # Wait for Windows desktop
+          # --------------------------------------------------------
+
+          Start-Sleep -Seconds 8
+
+          # --------------------------------------------------------
+          # Start Roblox Studio if installed
+          # --------------------------------------------------------
+
+          $studio = Get-ChildItem `
+            -Path "$env:LOCALAPPDATA\Roblox\Versions" `
+            -Filter "RobloxStudioBeta.exe" `
+            -Recurse `
+            -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if ($studio) {
+
+              $existingStudio = Get-Process `
+                -Name "RobloxStudioBeta" `
+                -ErrorAction SilentlyContinue
+
+              if (-not $existingStudio) {
+
+                  Write-Host "Starting Roblox Studio..."
+
+                  Start-Process `
+                    -FilePath $studio.FullName `
+                    -WorkingDirectory $studio.DirectoryName
+              }
+          }
+
+          # --------------------------------------------------------
+          # Wait a little for Studio
+          # --------------------------------------------------------
+
+          Start-Sleep -Seconds 10
+
+          # --------------------------------------------------------
+          # Start Roqer
+          # --------------------------------------------------------
+
+          if (-not (Test-Path $RoqerDir)) {
+              Write-Host "Roqer directory not found."
+              exit 1
+          }
+
+          Set-Location $RoqerDir
+
+          Write-Host "Starting Roqer..."
+
+          $process = Start-Process `
+            -FilePath $Npm `
+            -ArgumentList "run start:desktop" `
+            -WorkingDirectory $RoqerDir `
+            -PassThru
+
+          # --------------------------------------------------------
+          # Keep Roqer BELOW Roblox Studio priority
+          # --------------------------------------------------------
+
+          Start-Sleep -Seconds 8
+
+          $roqerNames = @(
+              "Roqer",
+              "electron",
+              "node"
+          )
+
+          foreach ($name in $roqerNames) {
+
+              Get-Process `
+                -Name $name `
+                -ErrorAction SilentlyContinue |
+                ForEach-Object {
+
+                    try {
+                        $_.PriorityClass = "BelowNormal"
+                    }
+                    catch {
+                    }
+                }
+          }
+
+          # --------------------------------------------------------
+          # Monitor priority without consuming CPU
+          # --------------------------------------------------------
+
+          while ($true) {
+
+              # Roblox Studio gets AboveNormal priority.
+              Get-Process `
+                -Name "RobloxStudioBeta" `
+                -ErrorAction SilentlyContinue |
+                ForEach-Object {
+
+                    try {
+                        $_.PriorityClass = "AboveNormal"
+                    }
+                    catch {
+                    }
+                }
+
+              # Roqer stays below Studio.
+              Get-Process `
+                -Name "Roqer" `
+                -ErrorAction SilentlyContinue |
+                ForEach-Object {
+
+                    try {
+                        $_.PriorityClass = "BelowNormal"
+                    }
+                    catch {
+                    }
+                }
+
+              Start-Sleep -Seconds 30
+          }
+          '@
+
+          Set-Content `
+            -Path $env:ROQER_SCRIPT `
+            -Value $script `
+            -Encoding UTF8
+
+          Write-Host "Roqer launcher created."
+
+      # ============================================================
+      # STEP 10 - Auto-start Roqer when user logs into RDP
+      # ============================================================
+      - name: Configure Roqer auto start
+        shell: powershell
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $taskName = "Roqer Roblox Agent"
+
+          Unregister-ScheduledTask `
+            -TaskName $taskName `
+            -Confirm:$false `
+            -ErrorAction SilentlyContinue
+
+          $action = New-ScheduledTaskAction `
+            -Execute "powershell.exe" `
+            -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$env:ROQER_SCRIPT`""
+
+          $trigger = New-ScheduledTaskTrigger `
+            -AtLogOn `
+            -User $env:RDP_USER
+
+          $principal = New-ScheduledTaskPrincipal `
+            -UserId $env:RDP_USER `
+            -LogonType Password `
+            -RunLevel Highest
+
+          $settings = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries `
+            -ExecutionTimeLimit ([TimeSpan]::Zero) `
+            -StartWhenAvailable
+
+          Register-ScheduledTask `
+            -TaskName $taskName `
+            -Action $action `
+            -Trigger $trigger `
+            -Principal $principal `
+            -Settings $settings `
+            -User $env:RDP_USER `
+            -Password $env:RDP_PASSWORD `
+            -Force | Out-Null
+
+          Write-Host "Roqer will auto-start when $env:RDP_USER logs in."
+
+      # ============================================================
+      # STEP 11 - No persistence / no cloud sync
+      # ============================================================
+      - name: Disable persistence and synchronization
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "============================================"
+          Write-Host "PERSISTENCE / SYNC STATUS"
+          Write-Host "============================================"
+
+          Write-Host "Google Drive             -> DISABLED"
+          Write-Host "Automatic backup         -> DISABLED"
+          Write-Host "Automatic restore        -> DISABLED"
+          Write-Host "Continuous sync          -> DISABLED"
+          Write-Host "Background upload       -> DISABLED"
+          Write-Host "Rclone                   -> NOT INSTALLED"
+          Write-Host "Windows Defender         -> ENABLED"
+          Write-Host "Windows Update           -> ENABLED"
+          Write-Host "Remote Desktop           -> ENABLED"
+          Write-Host "Tailscale                -> ENABLED"
+
+      # ============================================================
+      # STEP 12 - Final status
       # ============================================================
       - name: Show RDP information
         shell: powershell
@@ -717,10 +801,10 @@ jobs:
 
           Write-Host ""
           Write-Host "============================================================"
-          Write-Host "RDP READY"
+          Write-Host "                 ROBLOX RDP V8 READY"
           Write-Host "============================================================"
-
           Write-Host ""
+
           Write-Host "Username:"
           Write-Host $env:RDP_USER
 
@@ -729,8 +813,8 @@ jobs:
           Write-Host $env:RDP_PROFILE
 
           Write-Host ""
-          Write-Host "Ghidra workspace:"
-          Write-Host "$env:RDP_PROFILE\Ghidra"
+          Write-Host "Roqer:"
+          Write-Host $env:ROQER_DIR
 
           Write-Host ""
           Write-Host "Tailscale IPv4:"
@@ -740,42 +824,56 @@ jobs:
           }
 
           Write-Host ""
-          Write-Host "============================================================"
-          Write-Host "STORAGE / NETWORK BEHAVIOR"
-          Write-Host "============================================================"
-          Write-Host "Google Drive              -> DISABLED"
-          Write-Host "Automatic backup          -> DISABLED"
-          Write-Host "Automatic restore         -> DISABLED"
-          Write-Host "Continuous synchronization -> DISABLED"
-          Write-Host "Background file upload    -> DISABLED"
+          Write-Host "Roblox Studio          -> ENABLED"
+          Write-Host "Roqer                  -> ENABLED"
+          Write-Host "Roqer priority         -> BELOW NORMAL"
+          Write-Host "Roblox Studio priority -> ABOVE NORMAL"
+          Write-Host "Full Auto              -> AVAILABLE"
+          Write-Host "Google Drive           -> DISABLED"
+          Write-Host "Backup                 -> DISABLED"
+          Write-Host "Restore                -> DISABLED"
+          Write-Host "Continuous sync        -> DISABLED"
+          Write-Host "Windows Defender       -> ENABLED"
+          Write-Host "Windows Update         -> ENABLED"
           Write-Host ""
-          Write-Host "Windows Defender          -> ENABLED"
-          Write-Host "Windows Update            -> ENABLED"
-          Write-Host "RDP                       -> ENABLED"
-          Write-Host "Tailscale                 -> ENABLED"
-          Write-Host "============================================================"
 
+          Write-Host "============================================================"
 
       # ============================================================
-      # STEP 8
-      # Keep runner alive
+      # STEP 13 - Keep runner alive
       # ============================================================
       - name: Keep runner alive
         shell: powershell
         run: |
-          Write-Host ""
-          Write-Host "============================================================"
           Write-Host "RDP SESSION IS ACTIVE"
-          Write-Host "============================================================"
-          Write-Host "Environment optimized for Ghidra."
-          Write-Host "No automatic cloud synchronization."
-          Write-Host "Runner will remain alive."
-          Write-Host "============================================================"
+          Write-Host "Roblox Studio + Roqer environment is running."
 
           while ($true) {
 
+              $studio = Get-Process `
+                -Name "RobloxStudioBeta" `
+                -ErrorAction SilentlyContinue
+
+              $roqer = Get-Process `
+                -Name "Roqer" `
+                -ErrorAction SilentlyContinue
+
               Write-Host ""
               Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Runner alive."
+
+              if ($studio) {
+                  Write-Host "Roblox Studio: RUNNING"
+              }
+              else {
+                  Write-Host "Roblox Studio: NOT RUNNING"
+              }
+
+              if ($roqer) {
+                  Write-Host "Roqer: RUNNING"
+              }
+              else {
+                  Write-Host "Roqer: NOT RUNNING"
+              }
 
               Start-Sleep -Seconds 400
           }
